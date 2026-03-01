@@ -72,9 +72,9 @@
 
 | # | Caso de Teste | Passos | Resultado Esperado | Status |
 |---|--------------|--------|-------------------|--------|
-| A-01 | Login com credenciais válidas | 1. Acessar `http://localhost:3000/login` 2. Informar email e senha do admin 3. Clicar em "Entrar" | Redireciona para `/dashboard`. Token JWT armazenado. | ☐ |
-| A-02 | Login com senha incorreta | 1. Informar email correto e senha errada 2. Clicar em "Entrar" | Mensagem de erro "Credenciais inválidas" ou similar. Não redireciona. | ☐ |
-| A-03 | Logout | 1. Estando logado, clicar em "Sair" | Redireciona para `/login`. Token removido. | ☐ |
+| A-01 | Login com credenciais válidas | 1. Acessar `http://localhost:3000/login` 2. Informar email e senha do admin 3. Clicar em "Entrar" | Redireciona para `/dashboard`. Token JWT armazenado. | ☑ |
+| A-02 | Login com senha incorreta | 1. Informar email correto e senha errada 2. Clicar em "Entrar" | Mensagem de erro "Credenciais inválidas" ou similar. Não redireciona. | ☑ |
+| A-03 | Logout | 1. Estando logado, clicar em "Sair" | Redireciona para `/login`. Token removido. | ☑ |
 
 ### 2.2 Dashboard (`/dashboard`)
 
