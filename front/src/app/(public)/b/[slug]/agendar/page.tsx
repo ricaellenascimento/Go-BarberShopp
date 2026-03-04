@@ -17,6 +17,7 @@ import {
   FaEnvelope,
 } from "react-icons/fa";
 import { AuthTokenService } from "@/lib/services/authToken";
+import { formatPhoneBR, onlyDigits } from "@/lib/utils";
 
 interface BarberService {
   id: number;
@@ -167,7 +168,7 @@ export default function BarbershopBookingPage() {
         uri: "/public/booking",
         data: {
           email: clientEmail.trim(),
-          phone: clientPhone.trim(),
+          phone: onlyDigits(clientPhone),
           name: clientName.trim() || undefined,
           barberId: selectedBarber.idBarber,
           serviceTypeIds: selectedServices,
@@ -557,7 +558,7 @@ export default function BarbershopBookingPage() {
                       <input
                         type="tel"
                         value={clientPhone}
-                        onChange={(e) => setClientPhone(e.target.value)}
+                        onChange={(e) => setClientPhone(formatPhoneBR(e.target.value))}
                         placeholder="(81) 99999-9999"
                         className="gobarber-input text-sm"
                         required

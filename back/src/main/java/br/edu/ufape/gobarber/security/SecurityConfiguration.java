@@ -44,6 +44,9 @@ public class SecurityConfiguration {
                         .antMatchers(HttpMethod.GET, "/services/**").hasAnyRole("ADMIN", "BARBER", "SECRETARY")
                         .antMatchers("/services/**").hasRole("ADMIN")
 
+                        // Secretary - secretaria pode acessar apenas o proprio perfil
+                        .antMatchers(HttpMethod.GET, "/secretary/logged-secretary", "/secretary/logged-secretary/picture")
+                        .hasAnyRole("ADMIN", "SECRETARY")
                         // Secretary - admin gerencia secretárias
                         .antMatchers("/secretary/**").hasRole("ADMIN")
 
@@ -84,6 +87,9 @@ public class SecurityConfiguration {
                         // Barber Schedule - barbeiros e admin
                         .antMatchers("/barber-schedule/**").hasAnyRole("ADMIN", "BARBER")
 
+                        // Client - cliente pode acessar apenas o proprio perfil
+                        .antMatchers(HttpMethod.GET, "/client/logged-client", "/client/logged-client/photo")
+                        .hasRole("CLIENT")
                         // Client - admin e secretárias gerenciam, barbeiro pode ver
                         .antMatchers(HttpMethod.GET, "/client/**").hasAnyRole("ADMIN", "SECRETARY", "BARBER")
                         .antMatchers("/client/**").hasAnyRole("ADMIN", "SECRETARY")

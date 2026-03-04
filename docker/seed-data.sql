@@ -89,7 +89,6 @@ INSERT INTO employee (id_user, email, password, id_role) VALUES
 (5, 'lucas.barbeiro@gobarber.com',     '$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG', 2),
 (6, 'ana.secretaria@gobarber.com',     '$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG', 3),
 (7, 'maria.secretaria@gobarber.com',   '$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG', 3),
--- Clientes com acesso ao sistema (ROLE_CLIENT)
 (8,  'ricardo.gomes@email.com',         '$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG', 4),
 (9,  'fernando.lima@email.com',          '$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG', 4),
 (10, 'gustavo.alves@email.com',          '$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG', 4);

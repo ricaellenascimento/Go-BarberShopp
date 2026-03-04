@@ -22,6 +22,7 @@ import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import javax.servlet.http.HttpServletRequest;
 import javax.validation.Valid;
 import java.util.HashMap;
 import java.util.List;
@@ -168,6 +169,22 @@ public class ClientController implements ClientControllerDoc {
     @GetMapping("/{id}")
     public ResponseEntity<ClientDTO> findById(@PathVariable Long id) throws NotFoundException {
         return ResponseEntity.ok(clientService.findById(id));
+    }
+
+    @GetMapping("/logged-client")
+    public ResponseEntity<ClientDTO> getLoggedClientInfo(HttpServletRequest request) throws DataBaseException {
+        return ResponseEntity.ok(clientService.getClient(request));
+    }
+
+    @GetMapping("/logged-client/photo")
+    public ResponseEntity<byte[]> getLoggedClientPhoto(HttpServletRequest request) throws DataBaseException {
+        byte[] photo = clientService.getProfilePhoto(request);
+        if (photo == null) {
+            return new ResponseEntity<>(HttpStatus.NOT_FOUND);
+        }
+        return ResponseEntity.ok()
+                .contentType(MediaType.IMAGE_JPEG)
+                .body(photo);
     }
 
     @Override

@@ -5,6 +5,7 @@ import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
 import { genericaPublic } from "@/api/api";
 import { AuthTokenService } from "@/lib/services/authToken";
+import { formatPhoneBR, onlyDigits } from "@/lib/utils";
 import { toast } from "react-toastify";
 
 export default function CadastroClienteSlugPage() {
@@ -26,7 +27,11 @@ export default function CadastroClienteSlugPage() {
   const [loading, setLoading] = useState(false);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setForm({ ...form, [e.target.name]: e.target.value });
+    const { name, value } = e.target;
+    setForm((prev) => ({
+      ...prev,
+      [name]: name === "phone" ? formatPhoneBR(value) : value,
+    }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -55,7 +60,7 @@ export default function CadastroClienteSlugPage() {
         data: {
           name: form.name,
           email: form.email,
-          phone: form.phone,
+          phone: onlyDigits(form.phone),
           password: form.password,
         },
       });

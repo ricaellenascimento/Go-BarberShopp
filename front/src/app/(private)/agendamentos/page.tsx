@@ -7,6 +7,7 @@ import { generica } from "@/api/api";
 import { toast } from "react-toastify";
 import { FaPlus, FaSearch, FaTrash, FaEdit, FaEye, FaCheck, FaTimes, FaClock, FaHistory, FaCalendarCheck, FaUserClock } from "react-icons/fa";
 import Swal from "sweetalert2";
+import { formatPhoneBR, onlyDigits } from "@/lib/utils";
 
 interface Appointment {
   id: number;
@@ -104,7 +105,7 @@ export default function AgendamentosPage() {
   function openEdit(a: Appointment) {
     setForm({
       clientName: a.clientName || "",
-      clientNumber: a.clientNumber || "",
+      clientNumber: formatPhoneBR(a.clientNumber || ""),
       barberId: String(a.barberId || a.barber?.id || a.barber?.idBarber || ""),
       serviceTypeIds: a.serviceTypeIds || a.serviceType?.map(s => s.id!).filter(Boolean) || a.services?.map(s => s.id!).filter(Boolean) || [],
       startTime: a.startTime || (a.date && a.time ? `${a.date}T${a.time}` : ""),
@@ -119,7 +120,7 @@ export default function AgendamentosPage() {
     if (!form.clientName || !barberId || form.serviceTypeIds.length === 0 || !form.startTime) {
       toast.error("Preencha todos os campos obrigatórios"); return;
     }
-    const payload = { ...form, barberId };
+    const payload = { ...form, barberId, clientNumber: form.clientNumber ? onlyDigits(form.clientNumber) : "" };
     setSaving(true);
     try {
       if (editingId) {
@@ -460,7 +461,14 @@ export default function AgendamentosPage() {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Telefone</label>
-              <input type="text" value={form.clientNumber} onChange={(e) => setForm({ ...form, clientNumber: e.target.value })} className="gobarber-input" />
+              <input
+                type="text"
+                value={form.clientNumber}
+                onChange={(e) => setForm({ ...form, clientNumber: formatPhoneBR(e.target.value) })}
+                className="gobarber-input"
+                maxLength={15}
+                placeholder="(81) 99999-9999"
+              />
             </div>
           </div>
           <div>
@@ -512,7 +520,7 @@ export default function AgendamentosPage() {
                 <div><span className="text-xs text-gray-500">Término</span><p className="font-medium">{detailModal.endTime.includes("/") ? detailModal.endTime : new Date(detailModal.endTime).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</p></div>
               )}
               <div><span className="text-xs text-gray-500">Status</span><p className="font-medium">{getStatusBadge(detailModal.status)}</p></div>
-              <div><span className="text-xs text-gray-500">Telefone</span><p className="font-medium">{detailModal.clientNumber || "—"}</p></div>
+              <div><span className="text-xs text-gray-500">Telefone</span><p className="font-medium">{detailModal.clientNumber ? formatPhoneBR(detailModal.clientNumber) : "—"}</p></div>
               {detailModal.totalPrice != null && (
                 <div><span className="text-xs text-gray-500">Valor Total</span><p className="font-medium text-[#E94560]">R$ {detailModal.totalPrice.toFixed(2)}</p></div>
               )}

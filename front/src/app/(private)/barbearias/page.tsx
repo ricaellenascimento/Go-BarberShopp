@@ -9,6 +9,7 @@ import {
   FaClock, FaUsers, FaTimes, FaEye, FaUserPlus, FaUserMinus, FaFilter
 } from "react-icons/fa";
 import Swal from "sweetalert2";
+import { formatPhoneBR, onlyDigits } from "@/lib/utils";
 
 interface BarbershopData {
   idBarbershop: number;
@@ -100,7 +101,7 @@ export default function BarbeariasPage() {
       slug: shop.slug || "",
       description: shop.description || "",
       cnpj: shop.cnpj || "",
-      phone: shop.phone || "",
+      phone: formatPhoneBR(shop.phone || ""),
       email: shop.email || "",
       logoUrl: shop.logoUrl || "",
       bannerUrl: shop.bannerUrl || "",
@@ -126,7 +127,7 @@ export default function BarbeariasPage() {
         ...(form.slug?.trim() ? { slug: form.slug.trim() } : {}),
         ...(form.description?.trim() ? { description: form.description.trim() } : {}),
         ...(form.cnpj?.trim() ? { cnpj: form.cnpj.trim() } : {}),
-        ...(form.phone?.trim() ? { phone: form.phone.trim() } : {}),
+        ...(form.phone?.trim() ? { phone: onlyDigits(form.phone) } : {}),
         ...(form.email?.trim() ? { email: form.email.trim() } : {}),
         ...(form.logoUrl?.trim() ? { logoUrl: form.logoUrl.trim() } : {}),
         ...(form.bannerUrl?.trim() ? { bannerUrl: form.bannerUrl.trim() } : {}),
@@ -359,7 +360,7 @@ export default function BarbeariasPage() {
                   {shop.phone && (
                     <div className="flex items-center gap-2">
                       <FaPhone className="text-yellow-400 flex-shrink-0" />
-                      <span>{shop.phone}</span>
+                      <span>{formatPhoneBR(shop.phone)}</span>
                     </div>
                   )}
                   {shop.email && (
@@ -430,7 +431,7 @@ export default function BarbeariasPage() {
               <p><span className="text-gray-500">Nome:</span> {detailShop.name}</p>
               <p><span className="text-gray-500">Slug:</span> {detailShop.slug}</p>
               <p><span className="text-gray-500">CNPJ:</span> {detailShop.cnpj || "—"}</p>
-              <p><span className="text-gray-500">Telefone:</span> {detailShop.phone || "—"}</p>
+              <p><span className="text-gray-500">Telefone:</span> {detailShop.phone ? formatPhoneBR(detailShop.phone) : "—"}</p>
               <p><span className="text-gray-500">Email:</span> {detailShop.email || "—"}</p>
               <p><span className="text-gray-500">Horário:</span> {detailShop.openingHours || "—"}</p>
               <p><span className="text-gray-500">Endereço:</span> {[detailShop.street, detailShop.number, detailShop.neighborhood, detailShop.city, detailShop.state].filter(Boolean).join(", ") || "—"}</p>
@@ -493,7 +494,9 @@ export default function BarbeariasPage() {
                 </div>
                 <div>
                   <label className="block text-sm text-gray-400 mb-1">Telefone</label>
-                  <input value={form.phone} onChange={e => setForm({...form, phone: e.target.value})}
+                  <input value={form.phone} onChange={e => setForm({...form, phone: formatPhoneBR(e.target.value)})}
+                    maxLength={15}
+                    placeholder="(81) 99999-9999"
                     className="w-full px-3 py-2 rounded bg-gray-800 border border-gray-700 text-white focus:border-yellow-500 focus:outline-none" />
                 </div>
               </div>

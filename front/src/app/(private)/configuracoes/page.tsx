@@ -23,6 +23,10 @@ import {
 import { useThemeContext } from "@/contexts/ThemeContext";
 import { useRoles } from "@/hooks/useRoles";
 import Swal from "sweetalert2";
+import { formatPhoneBR, onlyDigits } from "@/lib/utils";
+
+type UserRole = "ADMIN" | "BARBER" | "SECRETARY" | "CLIENT";
+type ProfileSource = "AUTH" | "BARBER" | "SECRETARY" | "CLIENT";
 
 interface CancellationRule {
   id: number;
@@ -37,12 +41,128 @@ interface CancellationRule {
   active: boolean;
 }
 
+interface ProfileFieldProps {
+  label: string;
+  value: string;
+}
+
+const ROLE_LABELS: Record<UserRole, string> = {
+  ADMIN: "Administrador",
+  BARBER: "Barbeiro",
+  SECRETARY: "Secretaria",
+  CLIENT: "Cliente",
+};
+
+const PROFILE_SOURCE_LABELS: Record<ProfileSource, string> = {
+  AUTH: "Dados basicos",
+  BARBER: "Tabela barber",
+  SECRETARY: "Tabela secretary",
+  CLIENT: "Tabela client",
+};
+
+function normalizeRole(role: string | undefined): UserRole {
+  if (role === "ADMIN" || role === "BARBER" || role === "SECRETARY" || role === "CLIENT") {
+    return role;
+  }
+  return "CLIENT";
+}
+
+function asText(value: unknown, fallback = "-"): string {
+  if (value === null || value === undefined) return fallback;
+  const text = String(value).trim();
+  return text.length > 0 ? text : fallback;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  return value as Record<string, unknown>;
+}
+
+function formatDate(value: unknown): string {
+  const text = asText(value, "");
+  if (!text) return "-";
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    const [year, month, day] = text.split("-");
+    return `${day}/${month}/${year}`;
+  }
+
+  const parsed = new Date(text);
+  if (Number.isNaN(parsed.getTime())) return text;
+  return new Intl.DateTimeFormat("pt-BR").format(parsed);
+}
+
+function formatCurrency(value: unknown): string {
+  if (value === null || value === undefined || value === "") return "-";
+  const numberValue =
+    typeof value === "number" ? value : Number(String(value).replace(",", "."));
+  if (Number.isNaN(numberValue)) return "-";
+  return new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  }).format(numberValue);
+}
+
+function formatBoolean(value: unknown): string {
+  if (typeof value !== "boolean") return "-";
+  return value ? "Sim" : "Nao";
+}
+
+function formatAddress(address: Record<string, unknown> | undefined): string {
+  if (!address) return "-";
+  const street = asText(address.street, "");
+  const number = asText(address.number, "");
+  const neighborhood = asText(address.neighborhood, "");
+  const city = asText(address.city, "");
+  const state = asText(address.state, "");
+  const cep = asText(address.cep, "");
+
+  const parts = [
+    street,
+    number ? `No ${number}` : "",
+    neighborhood,
+    city,
+    state,
+    cep,
+  ].filter(Boolean);
+
+  return parts.length > 0 ? parts.join(", ") : "-";
+}
+
+function formatPhone(value: unknown): string {
+  const text = asText(value, "");
+  if (!text) return "-";
+  const digits = onlyDigits(text);
+  if (!digits) return text;
+  return formatPhoneBR(digits);
+}
+
+function createBlobUrl(data: unknown): string | null {
+  if (data === null || data === undefined) return null;
+  const blob = data instanceof Blob ? data : new Blob([data as BlobPart]);
+  return URL.createObjectURL(blob);
+}
+
+function ProfileField({ label, value }: ProfileFieldProps) {
+  return (
+    <div>
+      <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
+      <input type="text" value={value} className="gobarber-input bg-gray-50" readOnly />
+    </div>
+  );
+}
+
 export default function ConfiguracoesPage() {
   const auth = useContext(AuthContext);
   const user = auth?.user;
   const { mode, toggleMode } = useThemeContext();
   const { isAdmin } = useRoles();
   const [activeTab, setActiveTab] = useState("perfil");
+  const [profileData, setProfileData] = useState<Record<string, unknown> | null>(null);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const [profilePhoto, setProfilePhoto] = useState<string | null>(null);
+  const [profileSource, setProfileSource] = useState<ProfileSource>("AUTH");
 
   // Cancellation Rules state
   const [rules, setRules] = useState<CancellationRule[]>([]);
@@ -75,7 +195,21 @@ export default function ConfiguracoesPage() {
     }
   }, [activeTab, isAdmin]);
 
-  // GET /cancellation-rules/active — load currently active rule
+  useEffect(() => {
+    if (activeTab === "perfil" && user) {
+      loadRoleProfile();
+    }
+  }, [activeTab, user?.id, user?.email, user?.roles?.join("|")]);
+
+  useEffect(() => {
+    return () => {
+      if (profilePhoto) {
+        URL.revokeObjectURL(profilePhoto);
+      }
+    };
+  }, [profilePhoto]);
+
+  // GET /cancellation-rules/active - load currently active rule
   async function loadActiveRule() {
     try {
       const res = await generica({ metodo: "GET", uri: "/cancellation-rules/active" });
@@ -85,7 +219,7 @@ export default function ConfiguracoesPage() {
     }
   }
 
-  // GET /cancellation-rules/{id} — view rule detail
+  // GET /cancellation-rules/{id} - view rule detail
   async function viewRuleDetail(id: number) {
     try {
       const res = await generica({ metodo: "GET", uri: `/cancellation-rules/${id}` });
@@ -233,6 +367,112 @@ export default function ConfiguracoesPage() {
     ? [...baseTabs, { key: "cancelamento", label: "Cancelamento", icon: <FaBan /> }]
     : baseTabs;
 
+  const currentRole = normalizeRole(user?.roles?.[0]);
+  const profileAddress = asRecord(profileData?.address);
+  const profileServices = Array.isArray(profileData?.services)
+    ? (profileData?.services as Array<Record<string, unknown>>)
+        .map((service) => asText(service.name, ""))
+        .filter(Boolean)
+        .join(", ")
+    : "-";
+
+  const profileName = asText(profileData?.name ?? profileData?.nome ?? user?.nome, "Usuario");
+  const profileEmail = asText(profileData?.email ?? user?.email, "");
+
+  async function loadRoleProfile() {
+    if (!user) return;
+
+    setProfileLoading(true);
+    setProfileError(null);
+    setProfileSource("AUTH");
+    setProfileData({
+      name: user.nome,
+      email: user.email,
+      idUser: user.id,
+    });
+
+    setProfilePhoto((previous) => {
+      if (previous) URL.revokeObjectURL(previous);
+      return null;
+    });
+
+    const role = normalizeRole(user.roles?.[0]);
+
+    try {
+      if (role === "BARBER") {
+        const barberResponse = await generica({ metodo: "GET", uri: "/barber/logged-barber" });
+        if (barberResponse?.status === 200 && barberResponse?.data) {
+          setProfileData(barberResponse.data as Record<string, unknown>);
+          setProfileSource("BARBER");
+        } else {
+          setProfileError("Nao foi possivel carregar os dados completos do barbeiro.");
+        }
+
+        const barberPhotoResponse = await generica({
+          metodo: "GET",
+          uri: "/barber/logged-barber/picture",
+          responseType: "blob",
+        });
+        if (barberPhotoResponse?.status === 200 && barberPhotoResponse?.data) {
+          const photoUrl = createBlobUrl(barberPhotoResponse.data);
+          if (photoUrl) setProfilePhoto(photoUrl);
+        }
+      }
+
+      if (role === "SECRETARY") {
+        const secretaryResponse = await generica({
+          metodo: "GET",
+          uri: "/secretary/logged-secretary",
+        });
+        if (secretaryResponse?.status === 200 && secretaryResponse?.data) {
+          setProfileData(secretaryResponse.data as Record<string, unknown>);
+          setProfileSource("SECRETARY");
+        } else {
+          setProfileError("Nao foi possivel carregar os dados completos da secretaria.");
+        }
+
+        const secretaryPhotoResponse = await generica({
+          metodo: "GET",
+          uri: "/secretary/logged-secretary/picture",
+          responseType: "blob",
+        });
+        if (secretaryPhotoResponse?.status === 200 && secretaryPhotoResponse?.data) {
+          const photoUrl = createBlobUrl(secretaryPhotoResponse.data);
+          if (photoUrl) setProfilePhoto(photoUrl);
+        }
+      }
+
+      if (role === "CLIENT") {
+        const clientResponse = await generica({
+          metodo: "GET",
+          uri: "/client/logged-client",
+        });
+
+        if (clientResponse?.status === 200 && clientResponse?.data) {
+          const clientData = clientResponse.data as Record<string, unknown>;
+          setProfileData(clientData);
+          setProfileSource("CLIENT");
+
+          const clientPhotoResponse = await generica({
+            metodo: "GET",
+            uri: "/client/logged-client/photo",
+            responseType: "blob",
+          });
+          if (clientPhotoResponse?.status === 200 && clientPhotoResponse?.data) {
+            const photoUrl = createBlobUrl(clientPhotoResponse.data);
+            if (photoUrl) setProfilePhoto(photoUrl);
+          }
+        } else if (clientResponse?.status && clientResponse.status !== 404) {
+          setProfileError("Nao foi possivel carregar os dados completos do cliente.");
+        }
+      }
+    } catch {
+      setProfileError("Erro ao carregar dados de perfil.");
+    } finally {
+      setProfileLoading(false);
+    }
+  }
+
   return (
     <GoBarberLayout>
       <div className="space-y-6">
@@ -267,45 +507,139 @@ export default function ConfiguracoesPage() {
                 </h2>
                 <div className="flex items-center gap-4 pb-6 border-b border-gray-100">
                   <div className="w-16 h-16 rounded-full bg-gradient-to-br from-[#E94560] to-[#0F3460] flex items-center justify-center text-white text-2xl font-bold">
-                    {user?.nome?.charAt(0)?.toUpperCase() || "U"}
+                    {profilePhoto ? (
+                      <img
+                        src={profilePhoto}
+                        alt="Foto de perfil"
+                        className="w-16 h-16 rounded-full object-cover"
+                      />
+                    ) : (
+                      profileName.charAt(0)?.toUpperCase() || "U"
+                    )}
                   </div>
                   <div>
                     <p className="font-semibold text-[#1A1A2E]">
-                      {user?.nome || "Usuário"}
+                      {profileName}
                     </p>
-                    <p className="text-sm text-gray-500">{user?.email || ""}</p>
-                    <span className="inline-block mt-1 px-2 py-0.5 bg-[#E94560]/10 text-[#E94560] rounded text-xs font-medium">
-                      {user?.roles || "USER"}
-                    </span>
+                    <p className="text-sm text-gray-500">{profileEmail}</p>
+                    <div className="flex flex-wrap items-center gap-2 mt-1">
+                      <span className="inline-block px-2 py-0.5 bg-[#E94560]/10 text-[#E94560] rounded text-xs font-medium">
+                        {ROLE_LABELS[currentRole]}
+                      </span>
+                      <span className="inline-block px-2 py-0.5 bg-blue-50 text-blue-700 rounded text-xs font-medium">
+                        {PROFILE_SOURCE_LABELS[profileSource]}
+                      </span>
+                    </div>
                   </div>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Nome
-                    </label>
-                    <input
-                      type="text"
-                      value={user?.nome || ""}
-                      className="gobarber-input bg-gray-50"
-                      readOnly
-                    />
+
+                {profileLoading && (
+                  <div className="p-4 rounded-lg bg-gray-50 text-sm text-gray-500">
+                    Carregando dados do perfil...
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      E-mail
-                    </label>
-                    <input
-                      type="email"
-                      value={user?.email || ""}
-                      className="gobarber-input bg-gray-50"
-                      readOnly
-                    />
+                )}
+
+                {profileError && (
+                  <div className="p-4 rounded-lg bg-yellow-50 border border-yellow-200 text-sm text-yellow-800">
+                    {profileError}
                   </div>
-                </div>
+                )}
+
+                {!profileLoading && currentRole === "BARBER" && (
+                  <>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <ProfileField label="Nome" value={asText(profileData?.name, profileName)} />
+                      <ProfileField label="E-mail" value={asText(profileData?.email, profileEmail)} />
+                      <ProfileField label="CPF" value={asText(profileData?.cpf)} />
+                      <ProfileField label="Contato" value={formatPhone(profileData?.contato)} />
+                      <ProfileField
+                        label="Expediente"
+                        value={`${asText(profileData?.start)} as ${asText(profileData?.end)}`}
+                      />
+                      <ProfileField label="Salario" value={formatCurrency(profileData?.salary)} />
+                      <ProfileField
+                        label="Data de admissao"
+                        value={formatDate(profileData?.admissionDate)}
+                      />
+                      <ProfileField label="Carga horaria" value={asText(profileData?.workload)} />
+                      <ProfileField label="Servicos vinculados" value={profileServices || "-"} />
+                    </div>
+                    <div className="p-4 bg-gray-50 rounded-lg">
+                      <p className="text-sm font-medium text-gray-700 mb-1">Endereco</p>
+                      <p className="text-sm text-gray-600">{formatAddress(profileAddress)}</p>
+                    </div>
+                  </>
+                )}
+
+                {!profileLoading && currentRole === "SECRETARY" && (
+                  <>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <ProfileField label="Nome" value={asText(profileData?.name, profileName)} />
+                      <ProfileField label="E-mail" value={asText(profileData?.email, profileEmail)} />
+                      <ProfileField label="CPF" value={asText(profileData?.cpf)} />
+                      <ProfileField label="Contato" value={formatPhone(profileData?.contact)} />
+                      <ProfileField
+                        label="Expediente"
+                        value={`${asText(profileData?.start)} as ${asText(profileData?.end)}`}
+                      />
+                      <ProfileField label="Salario" value={formatCurrency(profileData?.salary)} />
+                      <ProfileField
+                        label="Data de admissao"
+                        value={formatDate(profileData?.admissionDate)}
+                      />
+                      <ProfileField label="Carga horaria" value={asText(profileData?.workload)} />
+                    </div>
+                    <div className="p-4 bg-gray-50 rounded-lg">
+                      <p className="text-sm font-medium text-gray-700 mb-1">Endereco</p>
+                      <p className="text-sm text-gray-600">{formatAddress(profileAddress)}</p>
+                    </div>
+                  </>
+                )}
+
+                {!profileLoading && currentRole === "CLIENT" && (
+                  <>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <ProfileField label="Nome" value={asText(profileData?.name, profileName)} />
+                      <ProfileField label="E-mail" value={asText(profileData?.email, profileEmail)} />
+                      <ProfileField label="Telefone" value={formatPhone(profileData?.phone)} />
+                      <ProfileField label="CPF" value={asText(profileData?.cpf)} />
+                      <ProfileField
+                        label="Data de nascimento"
+                        value={formatDate(profileData?.birthDate)}
+                      />
+                      <ProfileField label="Genero" value={asText(profileData?.gender)} />
+                      <ProfileField label="Pontos de fidelidade" value={asText(profileData?.loyaltyPoints)} />
+                      <ProfileField label="Tier de fidelidade" value={asText(profileData?.loyaltyTier)} />
+                      <ProfileField label="Total de visitas" value={asText(profileData?.totalVisits)} />
+                      <ProfileField label="Total gasto" value={formatCurrency(profileData?.totalSpent)} />
+                      <ProfileField
+                        label="Recebe promocoes"
+                        value={formatBoolean(profileData?.receivePromotions)}
+                      />
+                      <ProfileField
+                        label="Recebe lembretes"
+                        value={formatBoolean(profileData?.receiveReminders)}
+                      />
+                    </div>
+                    <div className="p-4 bg-gray-50 rounded-lg">
+                      <p className="text-sm font-medium text-gray-700 mb-1">Endereco</p>
+                      <p className="text-sm text-gray-600">{formatAddress(profileAddress)}</p>
+                    </div>
+                  </>
+                )}
+
+                {!profileLoading && currentRole === "ADMIN" && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <ProfileField label="Nome" value={profileName} />
+                    <ProfileField label="E-mail" value={profileEmail} />
+                    <ProfileField label="ID do usuario" value={asText(user?.id)} />
+                    <ProfileField label="Perfil de acesso" value={ROLE_LABELS[currentRole]} />
+                  </div>
+                )}
+
                 <p className="text-sm text-gray-500 italic">
-                  Para alterar dados do perfil, entre em contato com o administrador. 
-                  Use a aba <strong>Segurança</strong> para alterar sua senha.
+                  A visualizacao desta aba muda conforme o role do usuario e os dados disponiveis para cada tabela.
+                  Use a aba <strong>Seguranca</strong> para alterar sua senha.
                 </p>
               </div>
             )}
@@ -641,3 +975,4 @@ export default function ConfiguracoesPage() {
     </GoBarberLayout>
   );
 }
+
