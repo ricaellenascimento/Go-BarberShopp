@@ -158,6 +158,17 @@ public class ClientController implements ClientControllerDoc {
         return ResponseEntity.ok(updated);
     }
 
+    @PutMapping(value = "/logged-client", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<ClientDTO> updateLoggedClient(
+            HttpServletRequest request,
+            @RequestPart("client") ClientCreateDTO dto,
+            @RequestPart(value = "photo", required = false) MultipartFile photo)
+            throws DataBaseException {
+        ClientDTO loggedClient = clientService.getClient(request);
+        ClientDTO updated = clientService.update(loggedClient.getIdClient(), dto, photo);
+        return ResponseEntity.ok(updated);
+    }
+
     @Override
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(@PathVariable Long id) throws NotFoundException, DataBaseException {

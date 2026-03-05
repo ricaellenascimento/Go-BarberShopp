@@ -94,6 +94,17 @@ public class BarberService {
             }
         }
 
+        User barberUser = barber.getUser();
+        if (barberUser != null) {
+            if (barberCreateDTO.getEmail() != null && !barberCreateDTO.getEmail().isBlank()) {
+                barberUser.setLogin(barberCreateDTO.getEmail());
+            }
+            if (barberCreateDTO.getPassword() != null && !barberCreateDTO.getPassword().isBlank()) {
+                barberUser.setPassword(passwordEncoder.encode(barberCreateDTO.getPassword()));
+            }
+            barber.setUser(userRepository.save(barberUser));
+        }
+
         barber.setName(barberCreateDTO.getName());
         barber.setCpf(barberCreateDTO.getCpf());
         barber.setAddress(address);

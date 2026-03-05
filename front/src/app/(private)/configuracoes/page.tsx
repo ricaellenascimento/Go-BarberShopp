@@ -46,6 +46,57 @@ interface ProfileFieldProps {
   value: string;
 }
 
+interface ProfileAddressForm {
+  street: string;
+  number: string;
+  neighborhood: string;
+  city: string;
+  state: string;
+  cep: string;
+}
+
+interface ProfileEditForm {
+  name: string;
+  email: string;
+  cpf: string;
+  phone: string;
+  birthDate: string;
+  gender: string;
+  notes: string;
+  receivePromotions: boolean;
+  receiveReminders: boolean;
+  address: ProfileAddressForm;
+}
+
+const EMPTY_ADDRESS_FORM: ProfileAddressForm = {
+  street: "",
+  number: "",
+  neighborhood: "",
+  city: "",
+  state: "",
+  cep: "",
+};
+
+const EMPTY_PROFILE_FORM: ProfileEditForm = {
+  name: "",
+  email: "",
+  cpf: "",
+  phone: "",
+  birthDate: "",
+  gender: "",
+  notes: "",
+  receivePromotions: false,
+  receiveReminders: false,
+  address: EMPTY_ADDRESS_FORM,
+};
+
+const CLIENT_GENDER_OPTIONS = [
+  { value: "", label: "Selecione" },
+  { value: "MALE", label: "Masculino" },
+  { value: "FEMALE", label: "Feminino" },
+  { value: "OTHER", label: "Outro" },
+];
+
 const ROLE_LABELS: Record<UserRole, string> = {
   ADMIN: "Administrador",
   BARBER: "Barbeiro",
@@ -108,6 +159,16 @@ function formatBoolean(value: unknown): string {
   return value ? "Sim" : "Nao";
 }
 
+function formatGender(value: unknown): string {
+  const text = asText(value, "");
+  if (!text) return "-";
+  const normalized = text.toUpperCase();
+  if (normalized === "MALE") return "Masculino";
+  if (normalized === "FEMALE") return "Feminino";
+  if (normalized === "OTHER") return "Outro";
+  return text;
+}
+
 function formatAddress(address: Record<string, unknown> | undefined): string {
   if (!address) return "-";
   const street = asText(address.street, "");
@@ -137,6 +198,56 @@ function formatPhone(value: unknown): string {
   return formatPhoneBR(digits);
 }
 
+function toDateInputValue(value: unknown): string {
+  const text = asText(value, "");
+  if (!text) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+  const parsed = new Date(text);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return parsed.toISOString().slice(0, 10);
+}
+
+function mapAddressToForm(address: Record<string, unknown> | undefined): ProfileAddressForm {
+  if (!address) return { ...EMPTY_ADDRESS_FORM };
+  return {
+    street: asText(address.street, ""),
+    number: asText(address.number, ""),
+    neighborhood: asText(address.neighborhood, ""),
+    city: asText(address.city, ""),
+    state: asText(address.state, ""),
+    cep: asText(address.cep, ""),
+  };
+}
+
+function buildAddressPayload(address: ProfileAddressForm): Record<string, unknown> | null | undefined {
+  const normalized = {
+    street: address.street.trim(),
+    number: address.number.trim(),
+    neighborhood: address.neighborhood.trim(),
+    city: address.city.trim(),
+    state: address.state.trim().toUpperCase(),
+    cep: onlyDigits(address.cep).slice(0, 8),
+  };
+
+  const hasAnyValue = Object.values(normalized).some((value) => value.length > 0);
+  if (!hasAnyValue) return undefined;
+
+  if (!normalized.street || !normalized.neighborhood || !normalized.city || !normalized.state) {
+    return null;
+  }
+
+  const parsedNumber = Number(normalized.number);
+
+  return {
+    street: normalized.street,
+    number: normalized.number && Number.isFinite(parsedNumber) ? parsedNumber : undefined,
+    neighborhood: normalized.neighborhood,
+    city: normalized.city,
+    state: normalized.state,
+    cep: normalized.cep,
+  };
+}
+
 function createBlobUrl(data: unknown): string | null {
   if (data === null || data === undefined) return null;
   const blob = data instanceof Blob ? data : new Blob([data as BlobPart]);
@@ -163,6 +274,9 @@ export default function ConfiguracoesPage() {
   const [profileError, setProfileError] = useState<string | null>(null);
   const [profilePhoto, setProfilePhoto] = useState<string | null>(null);
   const [profileSource, setProfileSource] = useState<ProfileSource>("AUTH");
+  const [profileEditMode, setProfileEditMode] = useState(false);
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileForm, setProfileForm] = useState<ProfileEditForm>({ ...EMPTY_PROFILE_FORM });
 
   // Cancellation Rules state
   const [rules, setRules] = useState<CancellationRule[]>([]);
@@ -379,10 +493,179 @@ export default function ConfiguracoesPage() {
   const profileName = asText(profileData?.name ?? profileData?.nome ?? user?.nome, "Usuario");
   const profileEmail = asText(profileData?.email ?? user?.email, "");
 
+  function buildProfileForm(data: Record<string, unknown> | null): ProfileEditForm {
+    const base = data ?? {};
+    const contactValue =
+      currentRole === "BARBER"
+        ? asText(base.contato, "")
+        : currentRole === "SECRETARY"
+          ? asText(base.contact, "")
+          : asText(base.phone, "");
+
+    return {
+      name: asText(base.name ?? user?.nome, ""),
+      email: asText(base.email ?? user?.email, ""),
+      cpf: asText(base.cpf, ""),
+      phone: formatPhoneBR(contactValue),
+      birthDate: toDateInputValue(base.birthDate),
+      gender: asText(base.gender, ""),
+      notes: asText(base.notes, ""),
+      receivePromotions: typeof base.receivePromotions === "boolean" ? base.receivePromotions : false,
+      receiveReminders: typeof base.receiveReminders === "boolean" ? base.receiveReminders : false,
+      address: mapAddressToForm(asRecord(base.address)),
+    };
+  }
+
+  useEffect(() => {
+    if (profileEditMode) return;
+    setProfileForm(buildProfileForm(profileData));
+  }, [profileData, profileEditMode, currentRole, user?.nome, user?.email]);
+
+  function startProfileEdit() {
+    setProfileForm(buildProfileForm(profileData));
+    setProfileEditMode(true);
+  }
+
+  function cancelProfileEdit() {
+    setProfileForm(buildProfileForm(profileData));
+    setProfileEditMode(false);
+  }
+
+  async function handleSaveProfile() {
+    if (currentRole === "ADMIN") return;
+
+    const trimmedName = profileForm.name.trim();
+    const trimmedEmail = profileForm.email.trim();
+    const sanitizedCpf = onlyDigits(profileForm.cpf);
+    const sanitizedPhone = onlyDigits(profileForm.phone);
+
+    if (!trimmedName) {
+      toast.warn("Informe o nome");
+      return;
+    }
+    if (!trimmedEmail) {
+      toast.warn("Informe o email");
+      return;
+    }
+    if (currentRole === "CLIENT" && sanitizedPhone.length < 10) {
+      toast.warn("Informe um telefone valido");
+      return;
+    }
+
+    const addressPayload = buildAddressPayload(profileForm.address);
+    if (addressPayload === null) {
+      toast.warn("Preencha endereco completo (rua, bairro, cidade e estado) ou deixe em branco");
+      return;
+    }
+
+    setProfileSaving(true);
+    try {
+      if (currentRole === "BARBER") {
+        const serviceIds = Array.isArray(profileData?.services)
+          ? (profileData?.services as Array<Record<string, unknown>>)
+              .map((service) => Number(service.id))
+              .filter((id) => Number.isFinite(id))
+          : [];
+
+        const barberPayload: Record<string, unknown> = {
+          name: trimmedName,
+          email: trimmedEmail,
+          cpf: sanitizedCpf,
+          contato: sanitizedPhone,
+          salary: Number(profileData?.salary ?? 0),
+          workload: profileData?.workload ?? null,
+        };
+
+        const start = asText(profileData?.start, "");
+        const end = asText(profileData?.end, "");
+        const admissionDate = asText(profileData?.admissionDate, "");
+
+        if (start) barberPayload.start = start;
+        if (end) barberPayload.end = end;
+        if (admissionDate) barberPayload.admissionDate = admissionDate;
+        if (serviceIds.length > 0) barberPayload.idServices = serviceIds;
+        if (addressPayload) barberPayload.address = addressPayload;
+
+        const formData = new FormData();
+        formData.append("barber", JSON.stringify(barberPayload));
+        await generica({ metodo: "PUT", uri: "/barber/logged-barber", data: formData });
+      }
+
+      if (currentRole === "SECRETARY") {
+        const secretaryPayload: Record<string, unknown> = {
+          name: trimmedName,
+          email: trimmedEmail,
+          cpf: sanitizedCpf,
+          contact: sanitizedPhone,
+          salary: Number(profileData?.salary ?? 0),
+          workload: profileData?.workload ?? null,
+        };
+
+        const start = asText(profileData?.start, "");
+        const end = asText(profileData?.end, "");
+        const admissionDate = asText(profileData?.admissionDate, "");
+
+        if (start) secretaryPayload.start = start;
+        if (end) secretaryPayload.end = end;
+        if (admissionDate) secretaryPayload.admissionDate = admissionDate;
+        if (addressPayload) secretaryPayload.address = addressPayload;
+
+        const formData = new FormData();
+        formData.append("secretary", JSON.stringify(secretaryPayload));
+        await generica({ metodo: "PUT", uri: "/secretary/logged-secretary", data: formData });
+      }
+
+      if (currentRole === "CLIENT") {
+        const clientPayload: Record<string, unknown> = {
+          name: trimmedName,
+          email: trimmedEmail,
+          phone: sanitizedPhone,
+          cpf: sanitizedCpf || undefined,
+          birthDate: profileForm.birthDate || undefined,
+          gender: profileForm.gender || undefined,
+          notes: profileForm.notes.trim() || undefined,
+          receivePromotions: profileForm.receivePromotions,
+          receiveReminders: profileForm.receiveReminders,
+        };
+
+        const preferredBarberId = Number(profileData?.preferredBarberId);
+        if (Number.isFinite(preferredBarberId) && preferredBarberId > 0) {
+          clientPayload.preferredBarberId = preferredBarberId;
+        }
+
+        const preferredContactMethod = asText(profileData?.preferredContactMethod, "");
+        if (preferredContactMethod) {
+          clientPayload.preferredContactMethod = preferredContactMethod;
+        }
+
+        if (addressPayload) clientPayload.address = addressPayload;
+
+        const formData = new FormData();
+        formData.append(
+          "client",
+          new Blob([JSON.stringify(clientPayload)], { type: "application/json" }),
+        );
+        await generica({ metodo: "PUT", uri: "/client/logged-client", data: formData });
+      }
+
+      auth?.updateUser?.({ nome: trimmedName, email: trimmedEmail });
+      toast.success("Perfil atualizado com sucesso");
+      setProfileEditMode(false);
+      loadRoleProfile();
+    } catch (err: any) {
+      const message =
+        err?.response?.data?.message || err?.response?.data?.error || "Erro ao salvar perfil";
+      toast.error(message);
+    } finally {
+      setProfileSaving(false);
+    }
+  }
+
   async function loadRoleProfile() {
     if (!user) return;
 
     setProfileLoading(true);
+    setProfileEditMode(false);
     setProfileError(null);
     setProfileSource("AUTH");
     setProfileData({
@@ -502,9 +785,42 @@ export default function ConfiguracoesPage() {
           <div className="flex-1 gobarber-card">
             {activeTab === "perfil" && (
               <div className="space-y-6">
-                <h2 className="text-lg font-semibold text-[#1A1A2E]">
-                  Dados do Perfil
-                </h2>
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <h2 className="text-lg font-semibold text-[#1A1A2E]">Dados do Perfil</h2>
+                  {!profileLoading && currentRole !== "ADMIN" && (
+                    <div className="flex items-center gap-2">
+                      {profileEditMode ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={cancelProfileEdit}
+                            className="px-3 py-2 rounded-lg border border-gray-300 text-sm font-medium text-gray-600 hover:bg-gray-50"
+                          >
+                            Cancelar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleSaveProfile}
+                            disabled={profileSaving}
+                            className="px-3 py-2 rounded-lg bg-[#E94560] text-white text-sm font-medium hover:opacity-90 disabled:opacity-50 flex items-center gap-2"
+                          >
+                            <FaSave />
+                            {profileSaving ? "Salvando..." : "Salvar"}
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={startProfileEdit}
+                          className="px-3 py-2 rounded-lg bg-[#1A1A2E] text-white text-sm font-medium hover:opacity-90 flex items-center gap-2"
+                        >
+                          <FaEdit />
+                          Editar Perfil
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
                 <div className="flex items-center gap-4 pb-6 border-b border-gray-100">
                   <div className="w-16 h-16 rounded-full bg-gradient-to-br from-[#E94560] to-[#0F3460] flex items-center justify-center text-white text-2xl font-bold">
                     {profilePhoto ? (
@@ -547,84 +863,566 @@ export default function ConfiguracoesPage() {
 
                 {!profileLoading && currentRole === "BARBER" && (
                   <>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <ProfileField label="Nome" value={asText(profileData?.name, profileName)} />
-                      <ProfileField label="E-mail" value={asText(profileData?.email, profileEmail)} />
-                      <ProfileField label="CPF" value={asText(profileData?.cpf)} />
-                      <ProfileField label="Contato" value={formatPhone(profileData?.contato)} />
-                      <ProfileField
-                        label="Expediente"
-                        value={`${asText(profileData?.start)} as ${asText(profileData?.end)}`}
-                      />
-                      <ProfileField label="Salario" value={formatCurrency(profileData?.salary)} />
-                      <ProfileField
-                        label="Data de admissao"
-                        value={formatDate(profileData?.admissionDate)}
-                      />
-                      <ProfileField label="Carga horaria" value={asText(profileData?.workload)} />
-                      <ProfileField label="Servicos vinculados" value={profileServices || "-"} />
-                    </div>
-                    <div className="p-4 bg-gray-50 rounded-lg">
-                      <p className="text-sm font-medium text-gray-700 mb-1">Endereco</p>
-                      <p className="text-sm text-gray-600">{formatAddress(profileAddress)}</p>
-                    </div>
+                    {profileEditMode ? (
+                      <>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Nome *</label>
+                            <input
+                              type="text"
+                              value={profileForm.name}
+                              onChange={(e) => setProfileForm((prev) => ({ ...prev, name: e.target.value }))}
+                              className="gobarber-input"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">E-mail *</label>
+                            <input
+                              type="email"
+                              value={profileForm.email}
+                              onChange={(e) => setProfileForm((prev) => ({ ...prev, email: e.target.value }))}
+                              className="gobarber-input"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">CPF</label>
+                            <input
+                              type="text"
+                              value={profileForm.cpf}
+                              maxLength={11}
+                              onChange={(e) =>
+                                setProfileForm((prev) => ({ ...prev, cpf: onlyDigits(e.target.value) }))
+                              }
+                              className="gobarber-input"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Contato</label>
+                            <input
+                              type="text"
+                              value={profileForm.phone}
+                              maxLength={15}
+                              placeholder="(81) 99999-9999"
+                              onChange={(e) =>
+                                setProfileForm((prev) => ({ ...prev, phone: formatPhoneBR(e.target.value) }))
+                              }
+                              className="gobarber-input"
+                            />
+                          </div>
+                          <ProfileField
+                            label="Expediente (somente leitura)"
+                            value={`${asText(profileData?.start)} as ${asText(profileData?.end)}`}
+                          />
+                          <ProfileField label="Salario (somente leitura)" value={formatCurrency(profileData?.salary)} />
+                          <ProfileField
+                            label="Data de admissao (somente leitura)"
+                            value={formatDate(profileData?.admissionDate)}
+                          />
+                          <ProfileField label="Carga horaria (somente leitura)" value={asText(profileData?.workload)} />
+                          <ProfileField label="Servicos vinculados (somente leitura)" value={profileServices || "-"} />
+                        </div>
+                        <div className="p-4 bg-gray-50 rounded-lg space-y-3">
+                          <p className="text-sm font-medium text-gray-700">Endereco</p>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <input
+                              type="text"
+                              value={profileForm.address.street}
+                              onChange={(e) =>
+                                setProfileForm((prev) => ({
+                                  ...prev,
+                                  address: { ...prev.address, street: e.target.value },
+                                }))
+                              }
+                              placeholder="Rua"
+                              className="gobarber-input"
+                            />
+                            <input
+                              type="number"
+                              value={profileForm.address.number}
+                              onChange={(e) =>
+                                setProfileForm((prev) => ({
+                                  ...prev,
+                                  address: { ...prev.address, number: e.target.value },
+                                }))
+                              }
+                              placeholder="Numero"
+                              className="gobarber-input"
+                            />
+                            <input
+                              type="text"
+                              value={profileForm.address.neighborhood}
+                              onChange={(e) =>
+                                setProfileForm((prev) => ({
+                                  ...prev,
+                                  address: { ...prev.address, neighborhood: e.target.value },
+                                }))
+                              }
+                              placeholder="Bairro"
+                              className="gobarber-input"
+                            />
+                            <input
+                              type="text"
+                              value={profileForm.address.city}
+                              onChange={(e) =>
+                                setProfileForm((prev) => ({
+                                  ...prev,
+                                  address: { ...prev.address, city: e.target.value },
+                                }))
+                              }
+                              placeholder="Cidade"
+                              className="gobarber-input"
+                            />
+                            <input
+                              type="text"
+                              value={profileForm.address.state}
+                              maxLength={2}
+                              onChange={(e) =>
+                                setProfileForm((prev) => ({
+                                  ...prev,
+                                  address: { ...prev.address, state: e.target.value.toUpperCase() },
+                                }))
+                              }
+                              placeholder="UF"
+                              className="gobarber-input"
+                            />
+                            <input
+                              type="text"
+                              value={profileForm.address.cep}
+                              maxLength={8}
+                              onChange={(e) =>
+                                setProfileForm((prev) => ({
+                                  ...prev,
+                                  address: { ...prev.address, cep: onlyDigits(e.target.value).slice(0, 8) },
+                                }))
+                              }
+                              placeholder="CEP"
+                              className="gobarber-input"
+                            />
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <ProfileField label="Nome" value={asText(profileData?.name, profileName)} />
+                          <ProfileField label="E-mail" value={asText(profileData?.email, profileEmail)} />
+                          <ProfileField label="CPF" value={asText(profileData?.cpf)} />
+                          <ProfileField label="Contato" value={formatPhone(profileData?.contato)} />
+                          <ProfileField
+                            label="Expediente"
+                            value={`${asText(profileData?.start)} as ${asText(profileData?.end)}`}
+                          />
+                          <ProfileField label="Salario" value={formatCurrency(profileData?.salary)} />
+                          <ProfileField
+                            label="Data de admissao"
+                            value={formatDate(profileData?.admissionDate)}
+                          />
+                          <ProfileField label="Carga horaria" value={asText(profileData?.workload)} />
+                          <ProfileField label="Servicos vinculados" value={profileServices || "-"} />
+                        </div>
+                        <div className="p-4 bg-gray-50 rounded-lg">
+                          <p className="text-sm font-medium text-gray-700 mb-1">Endereco</p>
+                          <p className="text-sm text-gray-600">{formatAddress(profileAddress)}</p>
+                        </div>
+                      </>
+                    )}
                   </>
                 )}
 
                 {!profileLoading && currentRole === "SECRETARY" && (
                   <>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <ProfileField label="Nome" value={asText(profileData?.name, profileName)} />
-                      <ProfileField label="E-mail" value={asText(profileData?.email, profileEmail)} />
-                      <ProfileField label="CPF" value={asText(profileData?.cpf)} />
-                      <ProfileField label="Contato" value={formatPhone(profileData?.contact)} />
-                      <ProfileField
-                        label="Expediente"
-                        value={`${asText(profileData?.start)} as ${asText(profileData?.end)}`}
-                      />
-                      <ProfileField label="Salario" value={formatCurrency(profileData?.salary)} />
-                      <ProfileField
-                        label="Data de admissao"
-                        value={formatDate(profileData?.admissionDate)}
-                      />
-                      <ProfileField label="Carga horaria" value={asText(profileData?.workload)} />
-                    </div>
-                    <div className="p-4 bg-gray-50 rounded-lg">
-                      <p className="text-sm font-medium text-gray-700 mb-1">Endereco</p>
-                      <p className="text-sm text-gray-600">{formatAddress(profileAddress)}</p>
-                    </div>
+                    {profileEditMode ? (
+                      <>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Nome *</label>
+                            <input
+                              type="text"
+                              value={profileForm.name}
+                              onChange={(e) => setProfileForm((prev) => ({ ...prev, name: e.target.value }))}
+                              className="gobarber-input"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">E-mail *</label>
+                            <input
+                              type="email"
+                              value={profileForm.email}
+                              onChange={(e) => setProfileForm((prev) => ({ ...prev, email: e.target.value }))}
+                              className="gobarber-input"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">CPF</label>
+                            <input
+                              type="text"
+                              value={profileForm.cpf}
+                              maxLength={11}
+                              onChange={(e) =>
+                                setProfileForm((prev) => ({ ...prev, cpf: onlyDigits(e.target.value) }))
+                              }
+                              className="gobarber-input"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Contato</label>
+                            <input
+                              type="text"
+                              value={profileForm.phone}
+                              maxLength={15}
+                              placeholder="(81) 99999-9999"
+                              onChange={(e) =>
+                                setProfileForm((prev) => ({ ...prev, phone: formatPhoneBR(e.target.value) }))
+                              }
+                              className="gobarber-input"
+                            />
+                          </div>
+                          <ProfileField
+                            label="Expediente (somente leitura)"
+                            value={`${asText(profileData?.start)} as ${asText(profileData?.end)}`}
+                          />
+                          <ProfileField label="Salario (somente leitura)" value={formatCurrency(profileData?.salary)} />
+                          <ProfileField
+                            label="Data de admissao (somente leitura)"
+                            value={formatDate(profileData?.admissionDate)}
+                          />
+                          <ProfileField label="Carga horaria (somente leitura)" value={asText(profileData?.workload)} />
+                        </div>
+                        <div className="p-4 bg-gray-50 rounded-lg space-y-3">
+                          <p className="text-sm font-medium text-gray-700">Endereco</p>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <input
+                              type="text"
+                              value={profileForm.address.street}
+                              onChange={(e) =>
+                                setProfileForm((prev) => ({
+                                  ...prev,
+                                  address: { ...prev.address, street: e.target.value },
+                                }))
+                              }
+                              placeholder="Rua"
+                              className="gobarber-input"
+                            />
+                            <input
+                              type="number"
+                              value={profileForm.address.number}
+                              onChange={(e) =>
+                                setProfileForm((prev) => ({
+                                  ...prev,
+                                  address: { ...prev.address, number: e.target.value },
+                                }))
+                              }
+                              placeholder="Numero"
+                              className="gobarber-input"
+                            />
+                            <input
+                              type="text"
+                              value={profileForm.address.neighborhood}
+                              onChange={(e) =>
+                                setProfileForm((prev) => ({
+                                  ...prev,
+                                  address: { ...prev.address, neighborhood: e.target.value },
+                                }))
+                              }
+                              placeholder="Bairro"
+                              className="gobarber-input"
+                            />
+                            <input
+                              type="text"
+                              value={profileForm.address.city}
+                              onChange={(e) =>
+                                setProfileForm((prev) => ({
+                                  ...prev,
+                                  address: { ...prev.address, city: e.target.value },
+                                }))
+                              }
+                              placeholder="Cidade"
+                              className="gobarber-input"
+                            />
+                            <input
+                              type="text"
+                              value={profileForm.address.state}
+                              maxLength={2}
+                              onChange={(e) =>
+                                setProfileForm((prev) => ({
+                                  ...prev,
+                                  address: { ...prev.address, state: e.target.value.toUpperCase() },
+                                }))
+                              }
+                              placeholder="UF"
+                              className="gobarber-input"
+                            />
+                            <input
+                              type="text"
+                              value={profileForm.address.cep}
+                              maxLength={8}
+                              onChange={(e) =>
+                                setProfileForm((prev) => ({
+                                  ...prev,
+                                  address: { ...prev.address, cep: onlyDigits(e.target.value).slice(0, 8) },
+                                }))
+                              }
+                              placeholder="CEP"
+                              className="gobarber-input"
+                            />
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <ProfileField label="Nome" value={asText(profileData?.name, profileName)} />
+                          <ProfileField label="E-mail" value={asText(profileData?.email, profileEmail)} />
+                          <ProfileField label="CPF" value={asText(profileData?.cpf)} />
+                          <ProfileField label="Contato" value={formatPhone(profileData?.contact)} />
+                          <ProfileField
+                            label="Expediente"
+                            value={`${asText(profileData?.start)} as ${asText(profileData?.end)}`}
+                          />
+                          <ProfileField label="Salario" value={formatCurrency(profileData?.salary)} />
+                          <ProfileField
+                            label="Data de admissao"
+                            value={formatDate(profileData?.admissionDate)}
+                          />
+                          <ProfileField label="Carga horaria" value={asText(profileData?.workload)} />
+                        </div>
+                        <div className="p-4 bg-gray-50 rounded-lg">
+                          <p className="text-sm font-medium text-gray-700 mb-1">Endereco</p>
+                          <p className="text-sm text-gray-600">{formatAddress(profileAddress)}</p>
+                        </div>
+                      </>
+                    )}
                   </>
                 )}
 
                 {!profileLoading && currentRole === "CLIENT" && (
                   <>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <ProfileField label="Nome" value={asText(profileData?.name, profileName)} />
-                      <ProfileField label="E-mail" value={asText(profileData?.email, profileEmail)} />
-                      <ProfileField label="Telefone" value={formatPhone(profileData?.phone)} />
-                      <ProfileField label="CPF" value={asText(profileData?.cpf)} />
-                      <ProfileField
-                        label="Data de nascimento"
-                        value={formatDate(profileData?.birthDate)}
-                      />
-                      <ProfileField label="Genero" value={asText(profileData?.gender)} />
-                      <ProfileField label="Pontos de fidelidade" value={asText(profileData?.loyaltyPoints)} />
-                      <ProfileField label="Tier de fidelidade" value={asText(profileData?.loyaltyTier)} />
-                      <ProfileField label="Total de visitas" value={asText(profileData?.totalVisits)} />
-                      <ProfileField label="Total gasto" value={formatCurrency(profileData?.totalSpent)} />
-                      <ProfileField
-                        label="Recebe promocoes"
-                        value={formatBoolean(profileData?.receivePromotions)}
-                      />
-                      <ProfileField
-                        label="Recebe lembretes"
-                        value={formatBoolean(profileData?.receiveReminders)}
-                      />
-                    </div>
-                    <div className="p-4 bg-gray-50 rounded-lg">
-                      <p className="text-sm font-medium text-gray-700 mb-1">Endereco</p>
-                      <p className="text-sm text-gray-600">{formatAddress(profileAddress)}</p>
-                    </div>
+                    {profileEditMode ? (
+                      <>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Nome *</label>
+                            <input
+                              type="text"
+                              value={profileForm.name}
+                              onChange={(e) => setProfileForm((prev) => ({ ...prev, name: e.target.value }))}
+                              className="gobarber-input"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">E-mail *</label>
+                            <input
+                              type="email"
+                              value={profileForm.email}
+                              onChange={(e) => setProfileForm((prev) => ({ ...prev, email: e.target.value }))}
+                              className="gobarber-input"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Telefone *</label>
+                            <input
+                              type="text"
+                              value={profileForm.phone}
+                              maxLength={15}
+                              placeholder="(81) 99999-9999"
+                              onChange={(e) =>
+                                setProfileForm((prev) => ({ ...prev, phone: formatPhoneBR(e.target.value) }))
+                              }
+                              className="gobarber-input"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">CPF</label>
+                            <input
+                              type="text"
+                              value={profileForm.cpf}
+                              maxLength={11}
+                              onChange={(e) =>
+                                setProfileForm((prev) => ({ ...prev, cpf: onlyDigits(e.target.value) }))
+                              }
+                              className="gobarber-input"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Data de nascimento</label>
+                            <input
+                              type="date"
+                              value={profileForm.birthDate}
+                              onChange={(e) =>
+                                setProfileForm((prev) => ({ ...prev, birthDate: e.target.value }))
+                              }
+                              className="gobarber-input"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Genero</label>
+                            <select
+                              value={profileForm.gender}
+                              onChange={(e) => setProfileForm((prev) => ({ ...prev, gender: e.target.value }))}
+                              className="gobarber-input"
+                            >
+                              {CLIENT_GENDER_OPTIONS.map((option) => (
+                                <option key={option.value || "empty"} value={option.value}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <ProfileField label="Pontos de fidelidade (somente leitura)" value={asText(profileData?.loyaltyPoints)} />
+                          <ProfileField label="Tier de fidelidade (somente leitura)" value={asText(profileData?.loyaltyTier)} />
+                          <ProfileField label="Total de visitas (somente leitura)" value={asText(profileData?.totalVisits)} />
+                          <ProfileField label="Total gasto (somente leitura)" value={formatCurrency(profileData?.totalSpent)} />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Observacoes</label>
+                          <textarea
+                            value={profileForm.notes}
+                            onChange={(e) => setProfileForm((prev) => ({ ...prev, notes: e.target.value }))}
+                            rows={3}
+                            className="gobarber-input"
+                          />
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          <label className="flex items-center gap-2 text-sm text-gray-700">
+                            <input
+                              type="checkbox"
+                              checked={profileForm.receivePromotions}
+                              onChange={(e) =>
+                                setProfileForm((prev) => ({
+                                  ...prev,
+                                  receivePromotions: e.target.checked,
+                                }))
+                              }
+                              className="w-4 h-4 accent-[#E94560]"
+                            />
+                            Receber promocoes
+                          </label>
+                          <label className="flex items-center gap-2 text-sm text-gray-700">
+                            <input
+                              type="checkbox"
+                              checked={profileForm.receiveReminders}
+                              onChange={(e) =>
+                                setProfileForm((prev) => ({
+                                  ...prev,
+                                  receiveReminders: e.target.checked,
+                                }))
+                              }
+                              className="w-4 h-4 accent-[#E94560]"
+                            />
+                            Receber lembretes
+                          </label>
+                        </div>
+                        <div className="p-4 bg-gray-50 rounded-lg space-y-3">
+                          <p className="text-sm font-medium text-gray-700">Endereco</p>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <input
+                              type="text"
+                              value={profileForm.address.street}
+                              onChange={(e) =>
+                                setProfileForm((prev) => ({
+                                  ...prev,
+                                  address: { ...prev.address, street: e.target.value },
+                                }))
+                              }
+                              placeholder="Rua"
+                              className="gobarber-input"
+                            />
+                            <input
+                              type="number"
+                              value={profileForm.address.number}
+                              onChange={(e) =>
+                                setProfileForm((prev) => ({
+                                  ...prev,
+                                  address: { ...prev.address, number: e.target.value },
+                                }))
+                              }
+                              placeholder="Numero"
+                              className="gobarber-input"
+                            />
+                            <input
+                              type="text"
+                              value={profileForm.address.neighborhood}
+                              onChange={(e) =>
+                                setProfileForm((prev) => ({
+                                  ...prev,
+                                  address: { ...prev.address, neighborhood: e.target.value },
+                                }))
+                              }
+                              placeholder="Bairro"
+                              className="gobarber-input"
+                            />
+                            <input
+                              type="text"
+                              value={profileForm.address.city}
+                              onChange={(e) =>
+                                setProfileForm((prev) => ({
+                                  ...prev,
+                                  address: { ...prev.address, city: e.target.value },
+                                }))
+                              }
+                              placeholder="Cidade"
+                              className="gobarber-input"
+                            />
+                            <input
+                              type="text"
+                              value={profileForm.address.state}
+                              maxLength={2}
+                              onChange={(e) =>
+                                setProfileForm((prev) => ({
+                                  ...prev,
+                                  address: { ...prev.address, state: e.target.value.toUpperCase() },
+                                }))
+                              }
+                              placeholder="UF"
+                              className="gobarber-input"
+                            />
+                            <input
+                              type="text"
+                              value={profileForm.address.cep}
+                              maxLength={8}
+                              onChange={(e) =>
+                                setProfileForm((prev) => ({
+                                  ...prev,
+                                  address: { ...prev.address, cep: onlyDigits(e.target.value).slice(0, 8) },
+                                }))
+                              }
+                              placeholder="CEP"
+                              className="gobarber-input"
+                            />
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <ProfileField label="Nome" value={asText(profileData?.name, profileName)} />
+                          <ProfileField label="E-mail" value={asText(profileData?.email, profileEmail)} />
+                          <ProfileField label="Telefone" value={formatPhone(profileData?.phone)} />
+                          <ProfileField label="CPF" value={asText(profileData?.cpf)} />
+                          <ProfileField
+                            label="Data de nascimento"
+                            value={formatDate(profileData?.birthDate)}
+                          />
+                          <ProfileField label="Genero" value={formatGender(profileData?.gender)} />
+                          <ProfileField label="Pontos de fidelidade" value={asText(profileData?.loyaltyPoints)} />
+                          <ProfileField label="Tier de fidelidade" value={asText(profileData?.loyaltyTier)} />
+                          <ProfileField label="Total de visitas" value={asText(profileData?.totalVisits)} />
+                          <ProfileField label="Total gasto" value={formatCurrency(profileData?.totalSpent)} />
+                          <ProfileField
+                            label="Recebe promocoes"
+                            value={formatBoolean(profileData?.receivePromotions)}
+                          />
+                          <ProfileField
+                            label="Recebe lembretes"
+                            value={formatBoolean(profileData?.receiveReminders)}
+                          />
+                        </div>
+                        <div className="p-4 bg-gray-50 rounded-lg">
+                          <p className="text-sm font-medium text-gray-700 mb-1">Endereco</p>
+                          <p className="text-sm text-gray-600">{formatAddress(profileAddress)}</p>
+                        </div>
+                      </>
+                    )}
                   </>
                 )}
 
@@ -638,8 +1436,8 @@ export default function ConfiguracoesPage() {
                 )}
 
                 <p className="text-sm text-gray-500 italic">
-                  A visualizacao desta aba muda conforme o role do usuario e os dados disponiveis para cada tabela.
-                  Use a aba <strong>Seguranca</strong> para alterar sua senha.
+                  Nesta aba, dados pessoais podem ser editados por cliente, barbeiro e secretaria.
+                  Campos corporativos (salario, admissao, carga horaria e similares) ficam somente leitura.
                 </p>
               </div>
             )}

@@ -47,6 +47,7 @@ public class SecurityConfiguration {
                         // Secretary - secretaria pode acessar apenas o proprio perfil
                         .antMatchers(HttpMethod.GET, "/secretary/logged-secretary", "/secretary/logged-secretary/picture")
                         .hasAnyRole("ADMIN", "SECRETARY")
+                        .antMatchers("/secretary/logged-secretary/**").hasRole("SECRETARY")
                         // Secretary - admin gerencia secretárias
                         .antMatchers("/secretary/**").hasRole("ADMIN")
 
@@ -90,6 +91,7 @@ public class SecurityConfiguration {
                         // Client - cliente pode acessar apenas o proprio perfil
                         .antMatchers(HttpMethod.GET, "/client/logged-client", "/client/logged-client/photo")
                         .hasRole("CLIENT")
+                        .antMatchers("/client/logged-client/**").hasRole("CLIENT")
                         // Client - admin e secretárias gerenciam, barbeiro pode ver
                         .antMatchers(HttpMethod.GET, "/client/**").hasAnyRole("ADMIN", "SECRETARY", "BARBER")
                         .antMatchers("/client/**").hasAnyRole("ADMIN", "SECRETARY")
