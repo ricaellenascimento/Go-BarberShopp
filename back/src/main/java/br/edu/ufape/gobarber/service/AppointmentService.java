@@ -231,8 +231,8 @@ public class AppointmentService {
     }
 
     private void isTimeValidated(Appointment appointment){
-        if(appointment.getStartTime().isBefore(LocalDateTime.now())){
-            throw new AppointmentException("Não é possivel agendar para um dia/horário passado");
+        if (appointment.getStartTime().toLocalDate().isBefore(LocalDate.now())) {
+            throw new AppointmentException("Não é possível agendar para uma data passada");
         }
 
         if(!isTimeSlotOccupied(appointment.getBarber(), appointment.getStartTime(), appointment.getEndTime()) &&
@@ -392,8 +392,8 @@ public class AppointmentService {
             }
         }
         
-        if (appointment.getStartTime().isBefore(LocalDateTime.now())) {
-            throw new AppointmentException("Não é possível agendar para um dia/horário passado");
+        if (appointment.getStartTime().toLocalDate().isBefore(LocalDate.now())) {
+            throw new AppointmentException("Não é possível agendar para uma data passada");
         }
         
         return convertEntityToDTO(appointmentRepository.save(appointment));
@@ -583,7 +583,7 @@ public class AppointmentService {
             }
             
             // Slot do passado não é disponível
-            if (slotStart.isBefore(LocalDateTime.now())) {
+            if (slotStart.toLocalDate().isBefore(LocalDate.now())) {
                 isOccupied = true;
             }
             

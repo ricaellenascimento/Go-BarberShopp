@@ -39,6 +39,13 @@ interface Appointment {
   rejectionReason?: string;
 }
 
+interface BarbershopRef {
+  slug?: string;
+  active?: boolean;
+}
+
+const FALLBACK_SHOP_SLUG = process.env.NEXT_PUBLIC_SHOP_SLUG || "gobarber-principal";
+
 /**
  * Converte "dd/MM/yyyy HH:mm" para Date
  */
@@ -61,9 +68,11 @@ export default function MeusAgendamentosPage() {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<"upcoming" | "past">("upcoming");
+  const [bookingSlug, setBookingSlug] = useState(FALLBACK_SHOP_SLUG);
 
   useEffect(() => {
     loadMyAppointments();
+    resolveBookingSlug();
   }, []);
 
   async function loadMyAppointments() {
@@ -80,6 +89,47 @@ export default function MeusAgendamentosPage() {
       toast.error("Erro ao carregar agendamentos");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function resolveBookingSlug() {
+    let loggedClientId: number | undefined;
+
+    try {
+      const loggedClientRes = await generica({ metodo: "GET", uri: "/client/logged-client" });
+      if (loggedClientRes?.status === 200 && loggedClientRes?.data?.idClient) {
+        loggedClientId = loggedClientRes.data.idClient;
+      }
+    } catch {
+      // silencioso
+    }
+
+    if (loggedClientId) {
+      try {
+        const clientShopsRes = await generica({ metodo: "GET", uri: `/barbershop/client/${loggedClientId}` });
+        const clientShops: BarbershopRef[] = Array.isArray(clientShopsRes?.data) ? clientShopsRes.data : [];
+        const clientSlug =
+          clientShops.find((shop) => !!shop.slug && shop.active !== false)?.slug ||
+          clientShops.find((shop) => !!shop.slug)?.slug;
+
+        if (clientSlug) {
+          setBookingSlug(clientSlug);
+          return;
+        }
+      } catch {
+        // silencioso
+      }
+    }
+
+    try {
+      const activeShopsRes = await generica({ metodo: "GET", uri: "/barbershop/active" });
+      const activeShops: BarbershopRef[] = Array.isArray(activeShopsRes?.data) ? activeShopsRes.data : [];
+      const activeSlug = activeShops.find((shop) => !!shop.slug)?.slug;
+      if (activeSlug) {
+        setBookingSlug(activeSlug);
+      }
+    } catch {
+      // silencioso: mantém fallback
     }
   }
 
@@ -131,7 +181,7 @@ export default function MeusAgendamentosPage() {
             <p className="text-gray-500 text-sm mt-1">Acompanhe suas solicitações e agende novos horários</p>
           </div>
           <Link
-            href={`/b/${process.env.NEXT_PUBLIC_SHOP_SLUG || "gobarber"}/agendar`}
+            href={`/b/${bookingSlug}/agendar`}
             className="gobarber-btn-primary flex items-center gap-2 w-fit"
           >
             <FaPlus /> Novo Agendamento
@@ -169,7 +219,7 @@ export default function MeusAgendamentosPage() {
               {tab === "upcoming" ? "Nenhum agendamento próximo" : "Nenhum registro no histórico"}
             </p>
             {tab === "upcoming" && (
-              <Link href={`/b/${process.env.NEXT_PUBLIC_SHOP_SLUG || "gobarber"}/agendar`} className="text-[#E94560] font-semibold mt-2 inline-block hover:underline">
+              <Link href={`/b/${bookingSlug}/agendar`} className="text-[#E94560] font-semibold mt-2 inline-block hover:underline">
                 Agendar agora →
               </Link>
             )}

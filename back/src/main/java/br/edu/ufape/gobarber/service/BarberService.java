@@ -180,6 +180,12 @@ public class BarberService {
         );
     }
 
+    public List<BarberWithServiceDTO> getActiveBarbersForPublic() {
+        return barberRepository.findByActiveTrueOrActiveIsNull().stream()
+                .map(this::convertToCompleteDTO)
+                .collect(Collectors.toList());
+    }
+
     public byte[] getProfilePhoto(Integer id) throws DataBaseException {
         Barber barber = barberRepository.findById(id)
                 .orElseThrow(() -> new DataBaseException("Barbeiro não encontrado!"));
