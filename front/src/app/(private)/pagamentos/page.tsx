@@ -111,6 +111,12 @@ export default function PagamentosPage() {
 
   useEffect(() => { loadPayments(); loadBarbers(); loadClients(); loadAppointmentOptions(); loadPendingCount(); }, []);
 
+  async function refreshCurrentList() {
+    if (activeTab === "pending") await loadPendingPayments();
+    else await loadPayments();
+    await loadPendingCount();
+  }
+
   async function loadPayments() {
     setLoading(true);
     try {
@@ -191,7 +197,7 @@ export default function PagamentosPage() {
       if (res?.status === 200 || res?.status === 201) {
         toast.success("Pagamento registrado!");
         setModalOpen(false);
-        loadPayments();
+        await refreshCurrentList();
       } else toast.error(res?.data?.message || "Erro ao registrar pagamento");
     } catch { toast.error("Erro ao registrar pagamento"); }
     finally { setSaving(false); }
@@ -200,7 +206,7 @@ export default function PagamentosPage() {
   async function confirmPayment(id: number) {
     try {
       const res = await generica({ metodo: "POST", uri: `/payment/${id}/confirm`, params: { transactionId: `TXN-${Date.now()}` } });
-      if (res?.status === 200) { toast.success("Pagamento confirmado!"); loadPayments(); }
+      if (res?.status === 200) { toast.success("Pagamento confirmado!"); await refreshCurrentList(); }
       else toast.error("Erro ao confirmar");
     } catch { toast.error("Erro ao confirmar pagamento"); }
   }
@@ -219,7 +225,7 @@ export default function PagamentosPage() {
     if (!result.isConfirmed) return;
     try {
       const res = await generica({ metodo: "POST", uri: `/payment/${id}/cancel` });
-      if (res?.status === 200) { toast.success("Pagamento cancelado!"); loadPayments(); }
+      if (res?.status === 200) { toast.success("Pagamento cancelado!"); await refreshCurrentList(); }
       else toast.error("Erro ao cancelar");
     } catch { toast.error("Erro ao cancelar pagamento"); }
   }
@@ -240,7 +246,7 @@ export default function PagamentosPage() {
     if (!reason) return;
     try {
       const res = await generica({ metodo: "POST", uri: `/payment/${id}/refund`, params: { reason } });
-      if (res?.status === 200) { toast.success("Reembolso realizado!"); loadPayments(); }
+      if (res?.status === 200) { toast.success("Reembolso realizado!"); await refreshCurrentList(); }
       else toast.error("Erro ao reembolsar");
     } catch { toast.error("Erro ao reembolsar"); }
   }
@@ -280,7 +286,7 @@ export default function PagamentosPage() {
     if (reason === undefined) return;
     try {
       const res = await generica({ metodo: "POST", uri: `/payment/${id}/partial-refund`, params: { amount: parseFloat(amountStr), reason: reason || "Reembolso parcial" } });
-      if (res?.status === 200) { toast.success("Reembolso parcial realizado!"); loadPayments(); }
+      if (res?.status === 200) { toast.success("Reembolso parcial realizado!"); await refreshCurrentList(); }
       else toast.error("Erro ao reembolsar parcialmente");
     } catch { toast.error("Erro no reembolso parcial"); }
   }
@@ -366,7 +372,9 @@ export default function PagamentosPage() {
     try {
       const res = await generica({ metodo: "GET", uri: "/payment/pending", params: { page: 0, size: 100 } });
       const data = res?.data?.content || res?.data || [];
-      setPendingPayments(Array.isArray(data) ? data : []);
+      const list = Array.isArray(data) ? data : [];
+      setPendingPayments(list);
+      setPayments(list);
     } catch { /* silencioso */ }
     finally { setLoading(false); }
   }
