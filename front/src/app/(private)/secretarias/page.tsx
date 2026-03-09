@@ -8,6 +8,7 @@ import { toast } from "react-toastify";
 import { FaPlus, FaEdit, FaTrash, FaUserShield, FaEye, FaCamera, FaUser } from "react-icons/fa";
 import { useRoles } from "@/hooks";
 import Swal from "sweetalert2";
+import { formatPhoneBR, onlyDigits } from "@/lib/utils";
 
 interface Secretary {
   idSecretary: number;
@@ -107,7 +108,7 @@ export default function SecretariasPage() {
     setForm({
       name: s.name || "",
       email: s.email || "",
-      contact: s.contact || "",
+      contact: formatPhoneBR(s.contact || ""),
       cpf: s.cpf || "",
       password: "",
       salary: s.salary != null ? String(s.salary) : "",
@@ -144,6 +145,7 @@ export default function SecretariasPage() {
         const secretaryData = { ...sanitizedForm,
           salary: sanitizedForm.salary ? parseFloat(String(sanitizedForm.salary)) : 0,
           workload: sanitizedForm.workload ? parseInt(String(sanitizedForm.workload), 10) : 0,
+          contact: sanitizedForm.contact ? onlyDigits(sanitizedForm.contact) : "",
         };
         if (!secretaryData.password) {
           const { password, ...rest } = secretaryData;
@@ -167,6 +169,7 @@ export default function SecretariasPage() {
           ...sanitizedForm,
           salary: sanitizedForm.salary ? parseFloat(String(sanitizedForm.salary)) : 0,
           workload: sanitizedForm.workload ? parseInt(String(sanitizedForm.workload), 10) : 0,
+          contact: sanitizedForm.contact ? onlyDigits(sanitizedForm.contact) : "",
         };
         formData.append("secretary", JSON.stringify(cleanedSecretary));
         if (photoFile) formData.append("profilePhoto", photoFile);
@@ -238,7 +241,7 @@ export default function SecretariasPage() {
                   <tr key={s.idSecretary} className="border-b border-gray-100 hover:bg-gray-50">
                     <td className="py-3 px-4 font-medium">{s.name || "—"}</td>
                     <td className="py-3 px-4 text-gray-600 hidden sm:table-cell">{s.email || "—"}</td>
-                    <td className="py-3 px-4 text-gray-600 hidden md:table-cell">{s.contact || "—"}</td>
+                    <td className="py-3 px-4 text-gray-600 hidden md:table-cell">{s.contact ? formatPhoneBR(s.contact) : "—"}</td>
                     <td className="py-3 px-4 text-gray-600 hidden lg:table-cell">{s.cpf || "—"}</td>
                     <td className="py-3 px-4">
                       <div className="flex items-center gap-2">
@@ -268,7 +271,14 @@ export default function SecretariasPage() {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Telefone</label>
-              <input type="tel" value={form.contact} onChange={(e) => setForm({ ...form, contact: e.target.value })} className="gobarber-input" placeholder="(00) 00000-0000" />
+              <input
+                type="tel"
+                value={form.contact}
+                onChange={(e) => setForm({ ...form, contact: formatPhoneBR(e.target.value) })}
+                className="gobarber-input"
+                placeholder="(81) 99999-9999"
+                maxLength={15}
+              />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">CPF *</label>
@@ -339,7 +349,7 @@ export default function SecretariasPage() {
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <div className="bg-gray-50 p-3 rounded-lg"><p className="text-xs text-gray-500">Telefone</p><p className="font-medium">{detailSecretary.contact || "—"}</p></div>
+              <div className="bg-gray-50 p-3 rounded-lg"><p className="text-xs text-gray-500">Telefone</p><p className="font-medium">{detailSecretary.contact ? formatPhoneBR(detailSecretary.contact) : "—"}</p></div>
               <div className="bg-gray-50 p-3 rounded-lg"><p className="text-xs text-gray-500">CPF</p><p className="font-medium">{detailSecretary.cpf || "—"}</p></div>
               {detailSecretary.salary != null && (
                 <div className="bg-gray-50 p-3 rounded-lg"><p className="text-xs text-gray-500">Salário</p><p className="font-medium">R$ {Number(detailSecretary.salary).toFixed(2)}</p></div>

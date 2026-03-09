@@ -8,6 +8,7 @@ import { toast } from "react-toastify";
 import { FaPlus, FaSearch, FaTrash, FaEdit, FaEye, FaCamera, FaUser, FaLink, FaUnlink } from "react-icons/fa";
 import { useRoles } from "@/hooks";
 import Swal from "sweetalert2";
+import { formatPhoneBR, onlyDigits } from "@/lib/utils";
 
 interface Barber {
   idBarber: number;
@@ -188,7 +189,7 @@ export default function BarbeirosPage() {
       password: "",
       name: barber.name || "",
       cpf: barber.cpf || "",
-      contato: barber.contato || "",
+      contato: formatPhoneBR(barber.contato || ""),
       start: barber.start || "08:00",
       end: barber.end || "18:00",
       salary: barber.salary || 0,
@@ -219,6 +220,7 @@ export default function BarbeirosPage() {
     // Sanitize CEP: strip non-digits (DB column is varchar(8))
     const cleanForm = {
       ...form,
+      contato: form.contato ? onlyDigits(form.contato) : "",
       address: { ...form.address, cep: form.address.cep?.replace(/\D/g, "").substring(0, 8) || "" },
     };
     try {
@@ -346,7 +348,7 @@ export default function BarbeirosPage() {
                   </div>
                 </div>
                 {barber.contato && (
-                  <p className="text-sm text-gray-600 mb-3">📞 {barber.contato}</p>
+                  <p className="text-sm text-gray-600 mb-3">📞 {formatPhoneBR(barber.contato)}</p>
                 )}
                 {barber.services && barber.services.length > 0 && (
                   <div className="flex flex-wrap gap-1 mb-3">
@@ -410,7 +412,14 @@ export default function BarbeirosPage() {
             )}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Contato</label>
-              <input type="text" value={form.contato} onChange={(e) => setForm({ ...form, contato: e.target.value })} className="gobarber-input" maxLength={11} />
+              <input
+                type="text"
+                value={form.contato}
+                onChange={(e) => setForm({ ...form, contato: formatPhoneBR(e.target.value) })}
+                className="gobarber-input"
+                maxLength={15}
+                placeholder="(81) 99999-9999"
+              />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Salário</label>
@@ -513,7 +522,7 @@ export default function BarbeirosPage() {
             </div>
             <div className="grid grid-cols-2 gap-3 text-sm">
               <p><strong>CPF:</strong> {detailModal.cpf}</p>
-              <p><strong>Contato:</strong> {detailModal.contato || "—"}</p>
+              <p><strong>Contato:</strong> {detailModal.contato ? formatPhoneBR(detailModal.contato) : "—"}</p>
               <p><strong>Salário:</strong> R$ {detailModal.salary?.toFixed(2) || "0.00"}</p>
               <p><strong>Expediente:</strong> {detailModal.start || "—"} às {detailModal.end || "—"}</p>
               <p><strong>Admissão:</strong> {detailModal.admissionDate || "—"}</p>

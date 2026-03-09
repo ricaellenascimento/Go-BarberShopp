@@ -21,6 +21,10 @@ public class AppointmentRequestDTO {
     @NotNull(message = "O barbeiro é obrigatório")
     private Integer barberId;
 
+    private String clientName;
+
+    private String clientNumber;
+
     @NotNull(message = "Selecione pelo menos um serviço")
     private List<Integer> serviceTypeIds;
 

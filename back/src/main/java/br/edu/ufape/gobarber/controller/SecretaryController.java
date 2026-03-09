@@ -71,6 +71,15 @@ public class SecretaryController {
         return new ResponseEntity<>(updated, HttpStatus.OK);
     }
 
+    @PutMapping(value = "/logged-secretary", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<SecretaryDTO> updateLoggedSecretary(
+            HttpServletRequest request,
+            @RequestPart(value = "secretary") String secretaryJson,
+            @RequestPart(value = "profilePhoto", required = false) MultipartFile profilePhoto) throws DataBaseException {
+        SecretaryDTO loggedSecretary = secretaryService.getSecretary(request);
+        return updateSecretary(loggedSecretary.getIdSecretary(), secretaryJson, profilePhoto);
+    }
+
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> deleteSecretary(@PathVariable Integer id) {
         secretaryService.deleteSecretary(id);

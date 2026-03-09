@@ -37,13 +37,21 @@ public class SecurityConfiguration {
                         .antMatchers("/public/**").permitAll()
                         .antMatchers("/auth/logout").authenticated()
 
-                        // Stock - admin gerencia estoque
+                        // Stock - admin gerencia estoque; cliente consulta disponibilidade na Loja
+                        .antMatchers(HttpMethod.GET, "/stock/product/**").hasAnyRole("ADMIN", "CLIENT")
                         .antMatchers("/stock/**").hasRole("ADMIN")
+
+                        // Shop checkout - cliente finaliza carrinho
+                        .antMatchers(HttpMethod.POST, "/shop/checkout").hasAnyRole("ADMIN", "CLIENT")
 
                         // Services - GET para todos staff, escrita somente admin
                         .antMatchers(HttpMethod.GET, "/services/**").hasAnyRole("ADMIN", "BARBER", "SECRETARY")
                         .antMatchers("/services/**").hasRole("ADMIN")
 
+                        // Secretary - secretaria pode acessar apenas o proprio perfil
+                        .antMatchers(HttpMethod.GET, "/secretary/logged-secretary", "/secretary/logged-secretary/picture")
+                        .hasAnyRole("ADMIN", "SECRETARY")
+                        .antMatchers("/secretary/logged-secretary/**").hasRole("SECRETARY")
                         // Secretary - admin gerencia secretárias
                         .antMatchers("/secretary/**").hasRole("ADMIN")
 
@@ -65,7 +73,7 @@ public class SecurityConfiguration {
                         .antMatchers("/address/**").hasAnyRole("ADMIN", "SECRETARY")
 
                         // Appointments - rotas específicas primeiro, depois genérica
-                        .antMatchers("/appointments/request").hasRole("CLIENT")
+                        .antMatchers("/appointments/request").hasAnyRole("ADMIN", "SECRETARY", "BARBER", "CLIENT")
                         .antMatchers("/appointments/my/**", "/appointments/my").hasRole("CLIENT")
                         .antMatchers("/appointments/history", "/appointments/future/barber/own").hasRole("BARBER")
                         .antMatchers("/appointments/pending").hasAnyRole("ADMIN", "SECRETARY")
@@ -78,12 +86,17 @@ public class SecurityConfiguration {
 
                         // Reviews - GET para staff, escrita somente admin, POST criação para CLIENT
                         .antMatchers(HttpMethod.POST, "/review").hasAnyRole("ADMIN", "CLIENT")
+                        .antMatchers(HttpMethod.GET, "/review/client/**").hasAnyRole("ADMIN", "CLIENT")
                         .antMatchers(HttpMethod.GET, "/review/**").hasAnyRole("ADMIN", "BARBER", "SECRETARY")
                         .antMatchers("/review/**").hasRole("ADMIN")
 
                         // Barber Schedule - barbeiros e admin
                         .antMatchers("/barber-schedule/**").hasAnyRole("ADMIN", "BARBER")
 
+                        // Client - cliente pode acessar apenas o proprio perfil
+                        .antMatchers(HttpMethod.GET, "/client/logged-client", "/client/logged-client/photo")
+                        .hasRole("CLIENT")
+                        .antMatchers("/client/logged-client/**").hasRole("CLIENT")
                         // Client - admin e secretárias gerenciam, barbeiro pode ver
                         .antMatchers(HttpMethod.GET, "/client/**").hasAnyRole("ADMIN", "SECRETARY", "BARBER")
                         .antMatchers("/client/**").hasAnyRole("ADMIN", "SECRETARY")

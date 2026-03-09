@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+            http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- Permite pagamentos da Loja sem vinculo com agendamento -->
+    <changeSet id="9.0-payment-appointment-nullable" author="gobarber">
+        <dropNotNullConstraint
+                tableName="payment"
+                columnName="appointment_id"
+                columnDataType="BIGINT"/>
+    </changeSet>
+
+</databaseChangeLog>

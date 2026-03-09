@@ -155,7 +155,7 @@ function LoginContent() {
                 <p className="text-gray-400 text-xs mt-3">
                   Ou agende sem cadastro pela{" "}
                   <Link
-                    href={`/b/${process.env.NEXT_PUBLIC_SHOP_SLUG || "gobarber"}/agendar`}
+                    href={`/b/${process.env.NEXT_PUBLIC_SHOP_SLUG || "gobarber-principal"}/agendar`}
                     className="text-[#E94560] hover:underline"
                   >
                     página de agendamento

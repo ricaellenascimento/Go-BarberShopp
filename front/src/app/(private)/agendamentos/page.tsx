@@ -7,6 +7,7 @@ import { generica } from "@/api/api";
 import { toast } from "react-toastify";
 import { FaPlus, FaSearch, FaTrash, FaEdit, FaEye, FaCheck, FaTimes, FaClock, FaHistory, FaCalendarCheck, FaUserClock } from "react-icons/fa";
 import Swal from "sweetalert2";
+import { formatPhoneBR, onlyDigits } from "@/lib/utils";
 
 interface Appointment {
   id: number;
@@ -33,6 +34,7 @@ interface Barber { idBarber: number; name?: string; }
 interface Service { id: number; name?: string; }
 
 const initialForm = { clientName: "", clientNumber: "", barberId: "", serviceTypeIds: [] as number[], startTime: "" };
+const initialRequestForm = { clientName: "", clientNumber: "", barberId: "", serviceTypeIds: [] as number[], startTime: "" };
 
 const STATUS_MAP: Record<string, { label: string; color: string }> = {
   CONFIRMED: { label: "Confirmado", color: "bg-green-100 text-green-700" },
@@ -59,7 +61,7 @@ export default function AgendamentosPage() {
   const [activeTab, setActiveTab] = useState<"all" | "pending" | "future" | "history">("all");
   const [pendingCount, setPendingCount] = useState(0);
   const [requestModalOpen, setRequestModalOpen] = useState(false);
-  const [requestForm, setRequestForm] = useState({ barberId: "", serviceTypeIds: [] as number[], startTime: "" });
+  const [requestForm, setRequestForm] = useState(initialRequestForm);
 
   useEffect(() => { loadAppointments(); loadPendingAppointments(); loadBarbers(); loadServices(); }, []);
 
@@ -104,7 +106,7 @@ export default function AgendamentosPage() {
   function openEdit(a: Appointment) {
     setForm({
       clientName: a.clientName || "",
-      clientNumber: a.clientNumber || "",
+      clientNumber: formatPhoneBR(a.clientNumber || ""),
       barberId: String(a.barberId || a.barber?.id || a.barber?.idBarber || ""),
       serviceTypeIds: a.serviceTypeIds || a.serviceType?.map(s => s.id!).filter(Boolean) || a.services?.map(s => s.id!).filter(Boolean) || [],
       startTime: a.startTime || (a.date && a.time ? `${a.date}T${a.time}` : ""),
@@ -119,7 +121,7 @@ export default function AgendamentosPage() {
     if (!form.clientName || !barberId || form.serviceTypeIds.length === 0 || !form.startTime) {
       toast.error("Preencha todos os campos obrigatórios"); return;
     }
-    const payload = { ...form, barberId };
+    const payload = { ...form, barberId, clientNumber: form.clientNumber ? onlyDigits(form.clientNumber) : "" };
     setSaving(true);
     try {
       if (editingId) {
@@ -261,17 +263,31 @@ export default function AgendamentosPage() {
   async function handleRequest(e: React.FormEvent) {
     e.preventDefault();
     const barberId = parseInt(requestForm.barberId);
-    if (!barberId || requestForm.serviceTypeIds.length === 0 || !requestForm.startTime) {
+    const clientName = requestForm.clientName.trim();
+    const clientNumber = onlyDigits(requestForm.clientNumber);
+    const startTime = requestForm.startTime.length === 16 ? `${requestForm.startTime}:00` : requestForm.startTime;
+    if (!clientName || !clientNumber || !barberId || requestForm.serviceTypeIds.length === 0 || !startTime) {
       toast.error("Preencha todos os campos"); return;
     }
     setSaving(true);
     try {
-      const res = await generica({ metodo: "POST", uri: "/appointments/request", data: { barberId, serviceTypeIds: requestForm.serviceTypeIds, startTime: requestForm.startTime } });
+      const res = await generica({
+        metodo: "POST",
+        uri: "/appointments/request",
+        data: {
+          clientName,
+          clientNumber,
+          barberId,
+          serviceTypeIds: requestForm.serviceTypeIds,
+          startTime,
+        },
+      });
       if (res?.status === 200 || res?.status === 201) {
         toast.success("Solicitação enviada!");
+        setRequestForm(initialRequestForm);
         setRequestModalOpen(false);
         loadAppointments();
-      } else toast.error(res?.data?.message || "Erro ao solicitar");
+      } else toast.error(res?.data?.message || res?.data?.error || "Erro ao solicitar");
     } catch { toast.error("Erro ao solicitar agendamento"); }
     finally { setSaving(false); }
   }
@@ -360,7 +376,10 @@ export default function AgendamentosPage() {
           >
             <FaHistory /> Histórico
           </button>
-          <button onClick={() => setRequestModalOpen(true)} className="px-4 py-2 rounded-lg font-medium text-sm bg-blue-50 text-blue-700 hover:bg-blue-100 flex items-center gap-2 ml-auto">
+          <button
+            onClick={() => { setRequestForm(initialRequestForm); setRequestModalOpen(true); }}
+            className="px-4 py-2 rounded-lg font-medium text-sm bg-blue-50 text-blue-700 hover:bg-blue-100 flex items-center gap-2 ml-auto"
+          >
             <FaUserClock /> Solicitar
           </button>
         </div>
@@ -460,7 +479,14 @@ export default function AgendamentosPage() {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Telefone</label>
-              <input type="text" value={form.clientNumber} onChange={(e) => setForm({ ...form, clientNumber: e.target.value })} className="gobarber-input" />
+              <input
+                type="text"
+                value={form.clientNumber}
+                onChange={(e) => setForm({ ...form, clientNumber: formatPhoneBR(e.target.value) })}
+                className="gobarber-input"
+                maxLength={15}
+                placeholder="(81) 99999-9999"
+              />
             </div>
           </div>
           <div>
@@ -512,7 +538,7 @@ export default function AgendamentosPage() {
                 <div><span className="text-xs text-gray-500">Término</span><p className="font-medium">{detailModal.endTime.includes("/") ? detailModal.endTime : new Date(detailModal.endTime).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</p></div>
               )}
               <div><span className="text-xs text-gray-500">Status</span><p className="font-medium">{getStatusBadge(detailModal.status)}</p></div>
-              <div><span className="text-xs text-gray-500">Telefone</span><p className="font-medium">{detailModal.clientNumber || "—"}</p></div>
+              <div><span className="text-xs text-gray-500">Telefone</span><p className="font-medium">{detailModal.clientNumber ? formatPhoneBR(detailModal.clientNumber) : "—"}</p></div>
               {detailModal.totalPrice != null && (
                 <div><span className="text-xs text-gray-500">Valor Total</span><p className="font-medium text-[#E94560]">R$ {detailModal.totalPrice.toFixed(2)}</p></div>
               )}
@@ -545,8 +571,33 @@ export default function AgendamentosPage() {
       </Modal>
 
       {/* Modal de Solicitação (Cliente) */}
-      <Modal isOpen={requestModalOpen} onClose={() => setRequestModalOpen(false)} title="Solicitar Agendamento">
+      <Modal
+        isOpen={requestModalOpen}
+        onClose={() => { setRequestForm(initialRequestForm); setRequestModalOpen(false); }}
+        title="Solicitar Agendamento"
+      >
         <form onSubmit={handleRequest} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Nome do Cliente *</label>
+            <input
+              type="text"
+              value={requestForm.clientName}
+              onChange={(e) => setRequestForm({ ...requestForm, clientName: e.target.value })}
+              className="gobarber-input"
+              required
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Telefone do Cliente *</label>
+            <input
+              type="tel"
+              value={requestForm.clientNumber}
+              onChange={(e) => setRequestForm({ ...requestForm, clientNumber: formatPhoneBR(e.target.value) })}
+              className="gobarber-input"
+              placeholder="(00) 00000-0000"
+              required
+            />
+          </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Barbeiro *</label>
             <select value={requestForm.barberId} onChange={(e) => setRequestForm({ ...requestForm, barberId: e.target.value })} className="gobarber-input" required>
@@ -570,7 +621,13 @@ export default function AgendamentosPage() {
             <input type="datetime-local" value={requestForm.startTime} onChange={(e) => setRequestForm({ ...requestForm, startTime: e.target.value })} className="gobarber-input" required />
           </div>
           <div className="flex justify-end gap-3 pt-4 border-t">
-            <button type="button" onClick={() => setRequestModalOpen(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">Cancelar</button>
+            <button
+              type="button"
+              onClick={() => { setRequestForm(initialRequestForm); setRequestModalOpen(false); }}
+              className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg"
+            >
+              Cancelar
+            </button>
             <button type="submit" disabled={saving} className="gobarber-btn-primary">{saving ? "Enviando..." : "Solicitar"}</button>
           </div>
         </form>

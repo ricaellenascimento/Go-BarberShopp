@@ -34,29 +34,33 @@ public class ReviewService {
 
     @Transactional
     public ReviewDTO createReview(ReviewCreateDTO dto) throws DataBaseException {
-        // Verifica se já existe avaliação para o agendamento
-        if (dto.getAppointmentId() != null) {
-            if (reviewRepository.findByAppointmentId(dto.getAppointmentId()).isPresent()) {
-                throw new DataBaseException("Já existe uma avaliação para este agendamento");
-            }
+        if (dto.getAppointmentId() == null) {
+            throw new DataBaseException("Agendamento obrigatorio para criar avaliacao");
+        }
+
+        if (reviewRepository.findByAppointmentId(dto.getAppointmentId()).isPresent()) {
+            throw new DataBaseException("Ja existe avaliacao para este agendamento");
+        }
+
+        Appointment appointment = appointmentRepository.findById(dto.getAppointmentId())
+                .orElseThrow(() -> new ResourceNotFoundException("Agendamento nao encontrado"));
+
+        Client client = clientRepository.findById(dto.getClientId())
+                .orElseThrow(() -> new ResourceNotFoundException("Cliente nao encontrado"));
+        if (appointment.getClient() == null || !appointment.getClient().getIdClient().equals(client.getIdClient())) {
+            throw new DataBaseException("Cliente nao pertence ao agendamento informado");
+        }
+
+        Barber barber = barberRepository.findById(dto.getBarberId())
+                .orElseThrow(() -> new ResourceNotFoundException("Barbeiro nao encontrado"));
+        if (appointment.getBarber() == null || !appointment.getBarber().getIdBarber().equals(barber.getIdBarber())) {
+            throw new DataBaseException("Barbeiro nao corresponde ao agendamento informado");
         }
 
         Review review = new Review();
-        
-        Client client = clientRepository.findById(dto.getClientId())
-                .orElseThrow(() -> new ResourceNotFoundException("Cliente não encontrado"));
         review.setClient(client);
-
-        Barber barber = barberRepository.findById(dto.getBarberId())
-                .orElseThrow(() -> new ResourceNotFoundException("Barbeiro não encontrado"));
         review.setBarber(barber);
-
-        if (dto.getAppointmentId() != null) {
-            Appointment appointment = appointmentRepository.findById(dto.getAppointmentId())
-                    .orElseThrow(() -> new ResourceNotFoundException("Agendamento não encontrado"));
-            review.setAppointment(appointment);
-        }
-
+        review.setAppointment(appointment);
         review.setRating(dto.getRating());
         review.setComment(dto.getComment());
         review.setServiceRating(dto.getServiceRating());
@@ -66,14 +70,13 @@ public class ReviewService {
         review.setWouldRecommend(dto.getWouldRecommend() != null ? dto.getWouldRecommend() : true);
 
         Review saved = reviewRepository.save(review);
-        
+
         // Adiciona pontos de fidelidade por avaliar (5 pontos)
         client.addLoyaltyPoints(5);
         clientRepository.save(client);
 
         return ReviewDTO.fromEntity(saved);
     }
-
     @Transactional
     public ReviewDTO addReply(Long reviewId, String reply) {
         Review review = reviewRepository.findById(reviewId)

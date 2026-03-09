@@ -27,7 +27,7 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
 
     Page<Payment> findByPaymentMethod(Payment.PaymentMethod method, Pageable pageable);
 
-    @Query("SELECT p FROM Payment p WHERE p.paymentDate BETWEEN :startDate AND :endDate")
+    @Query("SELECT p FROM Payment p WHERE COALESCE(p.paymentDate, p.createdAt) BETWEEN :startDate AND :endDate")
     Page<Payment> findByDateRange(
             @Param("startDate") LocalDateTime startDate,
             @Param("endDate") LocalDateTime endDate,

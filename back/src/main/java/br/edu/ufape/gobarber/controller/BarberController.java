@@ -92,6 +92,16 @@ public class BarberController {
         return new ResponseEntity<>(updated, HttpStatus.OK);
     }
 
+    @PutMapping(value = "/logged-barber", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<BarberWithServiceDTO> updateLoggedBarber(
+            HttpServletRequest request,
+            @RequestPart(value = "barber") String barberJson,
+            @RequestPart(value = "profilePhoto", required = false) MultipartFile profilePhoto)
+            throws DataBaseException {
+        BarberWithServiceDTO loggedBarber = barberService.getBarber(request);
+        return updateBarber(loggedBarber.getIdBarber(), barberJson, profilePhoto);
+    }
+
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> deleteBarber(@PathVariable Integer id) {
         barberService.deleteBarber(id);

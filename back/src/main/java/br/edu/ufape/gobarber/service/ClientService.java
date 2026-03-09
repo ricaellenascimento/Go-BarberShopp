@@ -9,6 +9,7 @@ import br.edu.ufape.gobarber.model.Barber;
 import br.edu.ufape.gobarber.model.Client;
 import br.edu.ufape.gobarber.repository.BarberRepository;
 import br.edu.ufape.gobarber.repository.ClientRepository;
+import br.edu.ufape.gobarber.model.login.User;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -18,6 +19,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import javax.servlet.http.HttpServletRequest;
 import java.io.IOException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -35,6 +37,7 @@ public class ClientService {
     private final ClientRepository clientRepository;
     private final BarberRepository barberRepository;
     private final AddressService addressService;
+    private final UserService userService;
 
     @Transactional
     public ClientDTO createClient(ClientCreateDTO dto, MultipartFile photo) throws DataBaseException {
@@ -51,6 +54,9 @@ public class ClientService {
 
         Client client = new Client();
         mapDtoToEntity(dto, client);
+
+        User user = userService.findByLogin(dto.getEmail()).orElseThrow(() -> new DataBaseException("Usuário não encontrado"));
+        client.setUser(user);
 
         if (photo != null && !photo.isEmpty()) {
             try {
@@ -107,6 +113,22 @@ public class ClientService {
         return ClientDTO.fromEntity(client);
     }
 
+    public ClientDTO getClient(HttpServletRequest request) throws DataBaseException {
+        String token = request.getHeader("Authorization");
+        if (token == null || token.isBlank()) {
+            throw new DataBaseException("Token de autenticação não informado");
+        }
+
+        Integer userId = userService.getJtiFromToken(token);
+        User user = userService.findById(userId)
+                .orElseThrow(() -> new DataBaseException("Usuário autenticado não encontrado"));
+
+        Client client = clientRepository.findByUser(user)
+                .orElseThrow(() -> new DataBaseException("Não existe perfil de cliente associado a este login"));
+
+        return ClientDTO.fromEntity(client);
+    }
+
     public ClientDTO getClientByEmail(String email) {
         Client client = clientRepository.findByEmail(email)
                 .orElseThrow(() -> new ResourceNotFoundException("Cliente não encontrado"));
@@ -132,6 +154,22 @@ public class ClientService {
     public byte[] getClientPhoto(Long id) {
         Client client = clientRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Cliente não encontrado"));
+        return client.getProfilePhoto();
+    }
+
+    public byte[] getProfilePhoto(HttpServletRequest request) throws DataBaseException {
+        String token = request.getHeader("Authorization");
+        if (token == null || token.isBlank()) {
+            throw new DataBaseException("Token de autenticação não informado");
+        }
+
+        Integer userId = userService.getJtiFromToken(token);
+        User user = userService.findById(userId)
+                .orElseThrow(() -> new DataBaseException("Usuário autenticado não encontrado"));
+
+        Client client = clientRepository.findByUser(user)
+                .orElseThrow(() -> new DataBaseException("Não existe perfil de cliente associado a este login"));
+
         return client.getProfilePhoto();
     }
 

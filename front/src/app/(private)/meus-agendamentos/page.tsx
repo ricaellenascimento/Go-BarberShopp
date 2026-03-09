@@ -4,11 +4,14 @@ import GoBarberLayout from "@/components/Layout/GoBarberLayout";
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { generica } from "@/api/api";
+import Modal from "@/components/Modal/Modal";
 import { toast } from "react-toastify";
 import {
   FaCalendarAlt,
   FaClock,
   FaCut,
+  FaRegStar,
+  FaStar,
   FaPlus,
   FaTimesCircle,
 } from "react-icons/fa";
@@ -21,7 +24,9 @@ interface ServiceItem {
 }
 
 interface BarberInfo {
+  id?: number;
   idBarber?: number;
+  barberId?: number;
   name?: string;
 }
 
@@ -29,6 +34,7 @@ interface Appointment {
   id: number;
   clientName?: string;
   barber?: BarberInfo;
+  barberId?: number;
   barberName?: string;
   serviceType?: ServiceItem[];
   serviceNames?: string[];
@@ -39,13 +45,54 @@ interface Appointment {
   rejectionReason?: string;
 }
 
+interface BarbershopRef {
+  slug?: string;
+  active?: boolean;
+}
+
+const FALLBACK_SHOP_SLUG = process.env.NEXT_PUBLIC_SHOP_SLUG || "gobarber-principal";
+
+type ReviewFormState = {
+  rating: number;
+  comment: string;
+  serviceRating: number;
+  punctualityRating: number;
+  cleanlinessRating: number;
+  valueRating: number;
+  wouldRecommend: boolean;
+};
+
+const INITIAL_REVIEW_FORM: ReviewFormState = {
+  rating: 5,
+  comment: "",
+  serviceRating: 5,
+  punctualityRating: 5,
+  cleanlinessRating: 5,
+  valueRating: 5,
+  wouldRecommend: true,
+};
+
 /**
  * Converte "dd/MM/yyyy HH:mm" para Date
  */
 function parseDateTime(raw: string): Date | null {
-  if (/^\d{4}-/.test(raw)) return new Date(raw);
-  const m = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})/);
-  if (m) return new Date(+m[3], +m[2] - 1, +m[1], +m[4], +m[5]);
+  if (!raw) return null;
+  const value = raw.trim();
+
+  if (/^\d{4}-/.test(value)) {
+    const direct = new Date(value);
+    if (!Number.isNaN(direct.getTime())) return direct;
+
+    const normalized = new Date(value.replace(" ", "T"));
+    if (!Number.isNaN(normalized.getTime())) return normalized;
+  }
+
+  const br = value.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if (br) return new Date(+br[3], +br[2] - 1, +br[1], +br[4], +br[5], +(br[6] || 0));
+
+  const isoLike = value.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (isoLike) return new Date(+isoLike[1], +isoLike[2] - 1, +isoLike[3], +isoLike[4], +isoLike[5], +(isoLike[6] || 0));
+
   return null;
 }
 
@@ -61,9 +108,17 @@ export default function MeusAgendamentosPage() {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<"upcoming" | "past">("upcoming");
+  const [bookingSlug, setBookingSlug] = useState(FALLBACK_SHOP_SLUG);
+  const [loggedClientId, setLoggedClientId] = useState<number | null>(null);
+  const [reviewedAppointments, setReviewedAppointments] = useState<Set<number>>(new Set());
+  const [reviewModalOpen, setReviewModalOpen] = useState(false);
+  const [reviewTarget, setReviewTarget] = useState<Appointment | null>(null);
+  const [savingReview, setSavingReview] = useState(false);
+  const [reviewForm, setReviewForm] = useState<ReviewFormState>(INITIAL_REVIEW_FORM);
 
   useEffect(() => {
     loadMyAppointments();
+    resolveBookingSlug();
   }, []);
 
   async function loadMyAppointments() {
@@ -80,6 +135,75 @@ export default function MeusAgendamentosPage() {
       toast.error("Erro ao carregar agendamentos");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadClientReviews(clientId: number) {
+    try {
+      const res = await generica({
+        metodo: "GET",
+        uri: `/review/client/${clientId}`,
+        params: { page: 0, size: 200 },
+      });
+      const data = res?.data?.content || res?.data || [];
+      if (!Array.isArray(data)) {
+        setReviewedAppointments(new Set());
+        return;
+      }
+
+      const reviewed = new Set<number>();
+      data.forEach((review: any) => {
+        const appointmentId = Number(review?.appointmentId);
+        if (Number.isInteger(appointmentId) && appointmentId > 0) {
+          reviewed.add(appointmentId);
+        }
+      });
+      setReviewedAppointments(reviewed);
+    } catch {
+      setReviewedAppointments(new Set());
+    }
+  }
+
+  async function resolveBookingSlug() {
+    let resolvedClientId: number | undefined;
+
+    try {
+      const loggedClientRes = await generica({ metodo: "GET", uri: "/client/logged-client" });
+      if (loggedClientRes?.status === 200 && loggedClientRes?.data?.idClient) {
+        resolvedClientId = Number(loggedClientRes.data.idClient);
+        setLoggedClientId(resolvedClientId);
+      }
+    } catch {
+      // silencioso
+    }
+
+    if (resolvedClientId) {
+      await loadClientReviews(resolvedClientId);
+      try {
+        const clientShopsRes = await generica({ metodo: "GET", uri: `/barbershop/client/${resolvedClientId}` });
+        const clientShops: BarbershopRef[] = Array.isArray(clientShopsRes?.data) ? clientShopsRes.data : [];
+        const clientSlug =
+          clientShops.find((shop) => !!shop.slug && shop.active !== false)?.slug ||
+          clientShops.find((shop) => !!shop.slug)?.slug;
+
+        if (clientSlug) {
+          setBookingSlug(clientSlug);
+          return;
+        }
+      } catch {
+        // silencioso
+      }
+    }
+
+    try {
+      const activeShopsRes = await generica({ metodo: "GET", uri: "/barbershop/active" });
+      const activeShops: BarbershopRef[] = Array.isArray(activeShopsRes?.data) ? activeShopsRes.data : [];
+      const activeSlug = activeShops.find((shop) => !!shop.slug)?.slug;
+      if (activeSlug) {
+        setBookingSlug(activeSlug);
+      }
+    } catch {
+      // silencioso: mantém fallback
     }
   }
 
@@ -111,6 +235,163 @@ export default function MeusAgendamentosPage() {
     }
   }
 
+  function isReviewEligible(appointment: Appointment, referenceDate: Date) {
+    const status = (appointment.status || "").toUpperCase();
+    if (status === "CANCELLED" || status === "REJECTED") return false;
+    if (status === "COMPLETED") return true;
+
+    const compareDate = appointment.endTime
+      ? parseDateTime(appointment.endTime)
+      : appointment.startTime
+        ? parseDateTime(appointment.startTime)
+        : null;
+
+    return !compareDate || compareDate < referenceDate;
+  }
+
+  function getBarberId(appointment: Appointment | null | undefined): number | null {
+    if (!appointment) return null;
+    const value =
+      appointment.barber?.idBarber ??
+      appointment.barber?.id ??
+      appointment.barber?.barberId ??
+      appointment.barberId;
+    const numeric = Number(value);
+    return Number.isInteger(numeric) && numeric > 0 ? numeric : null;
+  }
+
+  function getBarberName(appointment: Appointment | null | undefined): string {
+    if (!appointment) return "Barbeiro";
+    if (appointment.barberName?.trim()) return appointment.barberName.trim();
+    if (appointment.barber?.name?.trim()) return appointment.barber.name.trim();
+    const barberId = getBarberId(appointment);
+    return barberId ? `Barbeiro #${barberId}` : "Barbeiro";
+  }
+
+  function openReviewModal(appointment: Appointment) {
+    if (reviewedAppointments.has(appointment.id)) {
+      toast.info("Este agendamento ja foi avaliado.");
+      return;
+    }
+
+    setReviewTarget(appointment);
+    setReviewForm(INITIAL_REVIEW_FORM);
+    setReviewModalOpen(true);
+  }
+
+  async function submitAppointmentReview(e: React.FormEvent) {
+    e.preventDefault();
+    if (!reviewTarget) return;
+
+    const reviewedAppointmentId = reviewTarget.id;
+    let barberId = getBarberId(reviewTarget);
+
+    if (!barberId) {
+      try {
+        const detailRes = await generica({ metodo: "GET", uri: `/appointments/${reviewedAppointmentId}` });
+        const detailed = detailRes?.data as Appointment | undefined;
+        barberId = getBarberId(detailed);
+      } catch {
+        // silencioso
+      }
+    }
+
+    if (!barberId) {
+      toast.error("Nao foi possivel identificar o barbeiro deste atendimento.");
+      return;
+    }
+
+    let clientId = loggedClientId;
+    if (!clientId) {
+      try {
+        const loggedClientRes = await generica({ metodo: "GET", uri: "/client/logged-client" });
+        if (loggedClientRes?.status === 200 && loggedClientRes?.data?.idClient) {
+          clientId = Number(loggedClientRes.data.idClient);
+          setLoggedClientId(clientId);
+        }
+      } catch {
+        // silencioso
+      }
+    }
+
+    if (!clientId) {
+      toast.error("Nao foi possivel identificar o cliente autenticado.");
+      return;
+    }
+
+    setSavingReview(true);
+    try {
+      const payload = {
+        ...reviewForm,
+        clientId,
+        barberId,
+        appointmentId: reviewedAppointmentId,
+      };
+      const res = await generica({
+        metodo: "POST",
+        uri: "/review",
+        data: payload,
+      });
+
+      if (res?.status === 200 || res?.status === 201) {
+        toast.success("Avaliacao enviada com sucesso!");
+        setReviewedAppointments((prev) => {
+          const next = new Set(prev);
+          next.add(reviewedAppointmentId);
+          return next;
+        });
+        setReviewModalOpen(false);
+        setReviewTarget(null);
+      } else if (res?.status === 409) {
+        toast.info("Este agendamento ja foi avaliado.");
+        setReviewedAppointments((prev) => {
+          const next = new Set(prev);
+          next.add(reviewedAppointmentId);
+          return next;
+        });
+        setReviewModalOpen(false);
+        setReviewTarget(null);
+      } else {
+        const msg = res?.data?.message || res?.data?.error;
+        toast.error(msg || "Erro ao enviar avaliacao");
+      }
+    } catch {
+      toast.error("Erro ao enviar avaliacao");
+    } finally {
+      setSavingReview(false);
+    }
+  }
+
+  const StarSelector = ({
+    value,
+    onChange,
+    label,
+  }: {
+    value: number;
+    onChange: (value: number) => void;
+    label: string;
+  }) => (
+    <div>
+      <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
+      <div className="flex gap-1">
+        {[1, 2, 3, 4, 5].map((star) => (
+          <button
+            key={star}
+            type="button"
+            onClick={() => onChange(star)}
+            className="p-1"
+          >
+            {star <= value ? (
+              <FaStar className="text-yellow-400 text-lg" />
+            ) : (
+              <FaRegStar className="text-gray-300 text-lg" />
+            )}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
   const now = new Date();
 
   const filtered = appointments.filter((a) => {
@@ -131,7 +412,7 @@ export default function MeusAgendamentosPage() {
             <p className="text-gray-500 text-sm mt-1">Acompanhe suas solicitações e agende novos horários</p>
           </div>
           <Link
-            href={`/b/${process.env.NEXT_PUBLIC_SHOP_SLUG || "gobarber"}/agendar`}
+            href={`/b/${bookingSlug}/agendar`}
             className="gobarber-btn-primary flex items-center gap-2 w-fit"
           >
             <FaPlus /> Novo Agendamento
@@ -169,7 +450,7 @@ export default function MeusAgendamentosPage() {
               {tab === "upcoming" ? "Nenhum agendamento próximo" : "Nenhum registro no histórico"}
             </p>
             {tab === "upcoming" && (
-              <Link href={`/b/${process.env.NEXT_PUBLIC_SHOP_SLUG || "gobarber"}/agendar`} className="text-[#E94560] font-semibold mt-2 inline-block hover:underline">
+              <Link href={`/b/${bookingSlug}/agendar`} className="text-[#E94560] font-semibold mt-2 inline-block hover:underline">
                 Agendar agora →
               </Link>
             )}
@@ -191,6 +472,8 @@ export default function MeusAgendamentosPage() {
                 const st = STATUS_MAP[a.status || ""] || { label: a.status || "", color: "bg-gray-100 text-gray-600" };
                 const canCancel =
                   (a.status === "PENDING_APPROVAL" || a.status === "CONFIRMED") && dt && dt > now;
+                const canReview = isReviewEligible(a, now);
+                const alreadyReviewed = reviewedAppointments.has(a.id);
 
                 return (
                   <div key={a.id} className="gobarber-card">
@@ -256,6 +539,19 @@ export default function MeusAgendamentosPage() {
                             <FaTimesCircle /> Cancelar
                           </button>
                         )}
+                        {canReview && !alreadyReviewed && (
+                          <button
+                            onClick={() => openReviewModal(a)}
+                            className="text-xs text-[#E94560] hover:text-[#c73b54] flex items-center gap-1 mt-1"
+                          >
+                            <FaStar /> Avaliar atendimento
+                          </button>
+                        )}
+                        {canReview && alreadyReviewed && (
+                          <span className="text-xs font-semibold px-2.5 py-1 rounded-full border bg-green-50 text-green-700 border-green-200 mt-1">
+                            Avaliado
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -264,6 +560,98 @@ export default function MeusAgendamentosPage() {
           </div>
         )}
       </div>
+
+      <Modal
+        isOpen={reviewModalOpen}
+        onClose={() => {
+          if (savingReview) return;
+          setReviewModalOpen(false);
+          setReviewTarget(null);
+        }}
+        title="Avaliar atendimento"
+      >
+        {reviewTarget && (
+          <form onSubmit={submitAppointmentReview} className="space-y-4">
+            <div className="rounded-lg bg-gray-50 p-3">
+              <p className="text-sm text-gray-500">Agendamento</p>
+              <p className="text-sm font-medium text-[#1A1A2E]">
+                #{reviewTarget.id} - {getBarberName(reviewTarget)}
+              </p>
+            </div>
+
+            <StarSelector
+              label="Nota geral *"
+              value={reviewForm.rating}
+              onChange={(value) => setReviewForm((prev) => ({ ...prev, rating: value }))}
+            />
+
+            <div className="grid grid-cols-2 gap-3">
+              <StarSelector
+                label="Servico"
+                value={reviewForm.serviceRating}
+                onChange={(value) => setReviewForm((prev) => ({ ...prev, serviceRating: value }))}
+              />
+              <StarSelector
+                label="Pontualidade"
+                value={reviewForm.punctualityRating}
+                onChange={(value) => setReviewForm((prev) => ({ ...prev, punctualityRating: value }))}
+              />
+              <StarSelector
+                label="Limpeza"
+                value={reviewForm.cleanlinessRating}
+                onChange={(value) => setReviewForm((prev) => ({ ...prev, cleanlinessRating: value }))}
+              />
+              <StarSelector
+                label="Custo-beneficio"
+                value={reviewForm.valueRating}
+                onChange={(value) => setReviewForm((prev) => ({ ...prev, valueRating: value }))}
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Comentario</label>
+              <textarea
+                value={reviewForm.comment}
+                onChange={(e) => setReviewForm((prev) => ({ ...prev, comment: e.target.value }))}
+                className="gobarber-input"
+                rows={3}
+                placeholder="Como foi seu atendimento?"
+              />
+            </div>
+
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={reviewForm.wouldRecommend}
+                onChange={(e) => setReviewForm((prev) => ({ ...prev, wouldRecommend: e.target.checked }))}
+                className="w-4 h-4 accent-[#E94560]"
+              />
+              Eu recomendaria este barbeiro
+            </label>
+
+            <div className="flex justify-end gap-3 pt-3 border-t">
+              <button
+                type="button"
+                onClick={() => {
+                  setReviewModalOpen(false);
+                  setReviewTarget(null);
+                }}
+                disabled={savingReview}
+                className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg disabled:opacity-60"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={savingReview}
+                className="gobarber-btn-primary disabled:opacity-60"
+              >
+                {savingReview ? "Enviando..." : "Enviar avaliacao"}
+              </button>
+            </div>
+          </form>
+        )}
+      </Modal>
     </GoBarberLayout>
   );
 }

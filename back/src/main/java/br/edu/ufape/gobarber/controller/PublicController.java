@@ -142,9 +142,12 @@ public class PublicController {
                     })
                     .filter(java.util.Objects::nonNull)
                     .collect(java.util.stream.Collectors.toList());
+            if (dtos.isEmpty()) {
+                return ResponseEntity.ok(barberService.getActiveBarbersForPublic());
+            }
             return ResponseEntity.ok(dtos);
         } catch (DataBaseException e) {
-            return ResponseEntity.notFound().build();
+            return ResponseEntity.ok(barberService.getActiveBarbersForPublic());
         }
     }
 

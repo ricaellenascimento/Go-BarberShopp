@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useParams } from "next/navigation";
-import { genericaPublic } from "@/api/api";
+import { generica, genericaPublic } from "@/api/api";
 import { toast } from "react-toastify";
 import {
   FaCut,
@@ -17,6 +17,7 @@ import {
   FaEnvelope,
 } from "react-icons/fa";
 import { AuthTokenService } from "@/lib/services/authToken";
+import { formatPhoneBR, onlyDigits } from "@/lib/utils";
 
 interface BarberService {
   id: number;
@@ -47,6 +48,11 @@ interface AvailabilityData {
   availableSlots: TimeSlot[];
 }
 
+interface BarbershopPublicRef {
+  slug?: string;
+  active?: boolean;
+}
+
 export default function BarbershopBookingPage() {
   const router = useRouter();
   const params = useParams();
@@ -74,29 +80,99 @@ export default function BarbershopBookingPage() {
     checkAuth();
   }, [slug]);
 
+  async function loadLoggedClientInfo() {
+    const res = await generica({ metodo: "GET", uri: "/client/logged-client" });
+    if (res?.status === 200 && res?.data) {
+      if (res.data.email) setClientEmail(String(res.data.email));
+      if (res.data.phone) setClientPhone(formatPhoneBR(String(res.data.phone)));
+      if (res.data.name) setClientName(String(res.data.name));
+    }
+  }
+
   function checkAuth() {
     try {
       const token = AuthTokenService.getAccessToken();
       if (token) {
         setIsLoggedIn(true);
         const user = AuthTokenService.getUser<{ roles?: string[] }>();
-        if (user?.roles?.[0]) setUserRole(user.roles[0]);
+        const role = user?.roles?.[0] || null;
+        setUserRole(role);
+        if (role === "CLIENT") {
+          void loadLoggedClientInfo();
+        }
+      } else {
+        setIsLoggedIn(false);
+        setUserRole(null);
       }
     } catch {
       setIsLoggedIn(false);
+      setUserRole(null);
     }
   }
 
+  async function fetchBarbersBySlug(shopSlug: string): Promise<BarberInfo[]> {
+    if (!shopSlug) return [];
+    const res = await genericaPublic({
+      metodo: "GET",
+      uri: `/public/barbershops/${shopSlug}/barbers`,
+    });
+    const data = res?.data?.content || res?.data || [];
+    return Array.isArray(data) ? data : [];
+  }
+
   async function loadBarbers() {
+    if (!slug) {
+      setBarbers([]);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     try {
-      const res = await genericaPublic({
-        metodo: "GET",
-        uri: `/public/barbershops/${slug}/barbers`,
-      });
-      const data = res?.data?.content || res?.data || [];
-      setBarbers(Array.isArray(data) ? data : []);
+      const testedSlugs = new Set<string>();
+      const tryLoad = async (candidateSlug: string) => {
+        const normalizedSlug = String(candidateSlug || "").trim();
+        if (!normalizedSlug || testedSlugs.has(normalizedSlug)) return null;
+        testedSlugs.add(normalizedSlug);
+
+        const result = await fetchBarbersBySlug(normalizedSlug);
+        if (result.length > 0) {
+          return { slug: normalizedSlug, barbers: result };
+        }
+        return null;
+      };
+
+      let loaded = await tryLoad(slug);
+
+      if (!loaded) {
+        const shopsRes = await genericaPublic({
+          metodo: "GET",
+          uri: "/public/barbershops/search",
+          params: { name: "" },
+        });
+        const shopsData = shopsRes?.data?.content || shopsRes?.data || [];
+        const shops: BarbershopPublicRef[] = Array.isArray(shopsData) ? shopsData : [];
+        const prioritizedSlugs = [
+          ...shops.filter((shop) => shop.active !== false).map((shop) => shop.slug).filter(Boolean),
+          ...shops.filter((shop) => shop.active === false).map((shop) => shop.slug).filter(Boolean),
+        ] as string[];
+
+        for (const candidateSlug of prioritizedSlugs) {
+          loaded = await tryLoad(candidateSlug);
+          if (loaded) break;
+        }
+      }
+
+      if (loaded) {
+        setBarbers(loaded.barbers);
+        if (loaded.slug !== slug) {
+          router.replace(`/b/${loaded.slug}/agendar`);
+        }
+      } else {
+        setBarbers([]);
+      }
     } catch {
+      setBarbers([]);
       toast.error("Erro ao carregar barbeiros");
     } finally {
       setLoading(false);
@@ -148,8 +224,12 @@ export default function BarbershopBookingPage() {
   }
 
   async function handleSubmitBooking() {
+    const email = clientEmail.trim();
+    const phone = onlyDigits(clientPhone);
+    const needsContactData = !isLoggedIn || !email || !phone;
+
     // Validar dados de verificação
-    if (!clientEmail.trim() || !clientPhone.trim()) {
+    if (needsContactData && (!email || !phone)) {
       toast.error("Preencha seu email e telefone para confirmar.");
       return;
     }
@@ -166,8 +246,8 @@ export default function BarbershopBookingPage() {
         metodo: "POST",
         uri: "/public/booking",
         data: {
-          email: clientEmail.trim(),
-          phone: clientPhone.trim(),
+          email,
+          phone,
           name: clientName.trim() || undefined,
           barberId: selectedBarber.idBarber,
           serviceTypeIds: selectedServices,
@@ -197,6 +277,7 @@ export default function BarbershopBookingPage() {
     selectedBarber?.services
       ?.filter((s) => selectedServices.includes(s.id))
       .reduce((sum, s) => sum + (s.value || 0), 0) || 0;
+  const needsContactData = !isLoggedIn || !clientEmail.trim() || !clientPhone.trim();
 
   // Título da barbearia baseado no slug  
   const shopName = slug
@@ -530,7 +611,7 @@ export default function BarbershopBookingPage() {
                 </div>
               </div>
 
-              {!isLoggedIn && (
+              {needsContactData && (
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 sm:p-5 space-y-4">
                   <p className="text-blue-700 text-sm font-medium">
                     <FaUser className="inline mr-1" />
@@ -557,7 +638,7 @@ export default function BarbershopBookingPage() {
                       <input
                         type="tel"
                         value={clientPhone}
-                        onChange={(e) => setClientPhone(e.target.value)}
+                        onChange={(e) => setClientPhone(formatPhoneBR(e.target.value))}
                         placeholder="(81) 99999-9999"
                         className="gobarber-input text-sm"
                         required
@@ -615,7 +696,7 @@ export default function BarbershopBookingPage() {
               Você receberá um email de confirmação assim que o agendamento for aprovado.
             </p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
-              <Link href={`/b/${slug}`} className="gobarber-btn-outline px-6 py-2 w-full sm:w-auto text-center">
+              <Link href="/meus-agendamentos" className="gobarber-btn-outline px-6 py-2 w-full sm:w-auto text-center">
                 Voltar ao Início
               </Link>
               <button

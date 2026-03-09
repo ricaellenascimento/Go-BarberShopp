@@ -93,6 +93,17 @@ public class SecretaryService {
             }
         }
 
+        User secretaryUser = secretary.getUser();
+        if (secretaryUser != null) {
+            if (secretaryCreateDTO.getEmail() != null && !secretaryCreateDTO.getEmail().isBlank()) {
+                secretaryUser.setLogin(secretaryCreateDTO.getEmail());
+            }
+            if (secretaryCreateDTO.getPassword() != null && !secretaryCreateDTO.getPassword().isBlank()) {
+                secretaryUser.setPassword(passwordEncoder.encode(secretaryCreateDTO.getPassword()));
+            }
+            secretary.setUser(userRepository.save(secretaryUser));
+        }
+
         secretary.setName(secretaryCreateDTO.getName());
         secretary.setCpf(secretaryCreateDTO.getCpf());
         secretary.setAddress(address);

@@ -7,6 +7,7 @@ import { generica } from "@/api/api";
 import { toast } from "react-toastify";
 import { FaPlus, FaSearch, FaTrash, FaEdit, FaEye, FaCamera, FaStar, FaGift, FaBirthdayCake, FaCrown, FaChartBar, FaUserCheck, FaUserTimes, FaHeart, FaHistory } from "react-icons/fa";
 import Swal from "sweetalert2";
+import { formatPhoneBR, onlyDigits } from "@/lib/utils";
 
 interface Client {
   idClient: number;
@@ -115,8 +116,13 @@ export default function ClientesPage() {
   }
 
   async function searchByPhone(phone: string) {
+    const sanitizedPhone = onlyDigits(phone);
+    if (!sanitizedPhone) {
+      loadClients();
+      return;
+    }
     try {
-      const res = await generica({ metodo: "GET", uri: `/client/phone/${phone}` });
+      const res = await generica({ metodo: "GET", uri: `/client/phone/${sanitizedPhone}` });
       if (res?.data) setClients(Array.isArray(res.data) ? res.data : [res.data]);
     } catch { toast.error("Cliente não encontrado"); }
   }
@@ -229,7 +235,7 @@ export default function ClientesPage() {
 
   function openEdit(c: Client) {
     setForm({
-      name: c.name || "", email: c.email || "", phone: c.phone || "", cpf: c.cpf || "",
+      name: c.name || "", email: c.email || "", phone: formatPhoneBR(c.phone || ""), cpf: c.cpf || "",
       birthDate: c.birthDate || "", gender: c.gender || "", notes: c.notes || "", password: "",
       address: {
         street: c.address?.street || "",
@@ -256,7 +262,7 @@ export default function ClientesPage() {
       if (editingId) {
         const cleanedUpdateForm = {
           ...form,
-          phone: form.phone ? form.phone.replace(/\D/g, "") : "",
+          phone: form.phone ? onlyDigits(form.phone) : "",
           gender: form.gender || undefined,
           address: (sanitizedAddress?.street || sanitizedAddress?.city) ? sanitizedAddress : undefined,
         };
@@ -269,7 +275,7 @@ export default function ClientesPage() {
       } else {
         const cleanedForm = {
           ...form,
-          phone: form.phone ? form.phone.replace(/\D/g, "") : "",
+          phone: form.phone ? onlyDigits(form.phone) : "",
           gender: form.gender || undefined,
           address: (sanitizedAddress?.street || sanitizedAddress?.city) ? sanitizedAddress : undefined,
         };
@@ -351,9 +357,7 @@ export default function ClientesPage() {
             { key: "top", label: "Top Clientes", icon: <FaStar />, fn: loadTopClients },
             { key: "spenders", label: "Top Gastos", icon: <FaChartBar />, fn: loadTopSpenders },
             { key: "inactive", label: "Inativos", icon: <FaUserTimes />, fn: loadInactive },
-            { key: "bday-today", label: "Aniversário Hoje", icon: <FaBirthdayCake />, fn: loadBirthdaysToday },
-            { key: "bday-month", label: "Aniversário Mês", fn: loadBirthdaysMonth },
-            { key: "bday-all", label: "Aniversários", fn: loadBirthdays },
+            { key: "bday-all", label: "Aniversário Mês", icon: <FaBirthdayCake />, fn: loadBirthdays },
             { key: "promo", label: "Para Promoções", icon: <FaGift />, fn: loadForPromotions },
           ].map(tab => (
             <button key={tab.key} onClick={() => { setActiveTab(tab.key); tab.fn(); }}
@@ -385,19 +389,21 @@ export default function ClientesPage() {
             </select>
             <div className="relative flex-1">
               <FaSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-              <input type="text" placeholder={`Buscar por ${advancedSearch.type}...`} value={advancedSearch.value}
-                onChange={(e) => setAdvancedSearch({...advancedSearch, value: e.target.value})}
+              <input
+                type="text"
+                placeholder={`Buscar por ${advancedSearch.type}...`}
+                value={advancedSearch.value}
+                onChange={(e) =>
+                  setAdvancedSearch({
+                    ...advancedSearch,
+                    value: advancedSearch.type === "phone" ? formatPhoneBR(e.target.value) : e.target.value,
+                  })
+                }
                 onKeyDown={(e) => e.key === "Enter" && handleAdvancedSearch()}
-                className="gobarber-input pl-10" />
+                className="gobarber-input pl-10"
+              />
             </div>
             <button onClick={handleAdvancedSearch} className="px-4 py-2 bg-[#E94560] text-white rounded-lg text-sm">Buscar</button>
-          </div>
-        </div>
-
-        <div className="gobarber-card">
-          <div className="relative">
-            <FaSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input type="text" placeholder="Buscar clientes por nome, email ou CPF..." value={search} onChange={(e) => setSearch(e.target.value)} className="gobarber-input pl-10" />
           </div>
         </div>
 
@@ -425,7 +431,7 @@ export default function ClientesPage() {
                       <div className="text-xs text-gray-400 sm:hidden">{client.email || ""}</div>
                     </td>
                     <td className="py-3 px-3 sm:px-4 text-gray-600 hidden sm:table-cell">{client.email || "—"}</td>
-                    <td className="py-3 px-3 sm:px-4 text-gray-600 hidden md:table-cell">{client.phone || "—"}</td>
+                    <td className="py-3 px-3 sm:px-4 text-gray-600 hidden md:table-cell">{client.phone ? formatPhoneBR(client.phone) : "—"}</td>
                     <td className="py-3 px-3 sm:px-4">
                       <span className="px-2 py-1 text-xs rounded-full bg-yellow-100 text-yellow-700">{client.loyaltyPoints ?? 0} pts</span>
                     </td>
@@ -460,7 +466,14 @@ export default function ClientesPage() {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Telefone</label>
-              <input type="text" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} className="gobarber-input" maxLength={11} />
+              <input
+                type="text"
+                value={form.phone}
+                onChange={(e) => setForm({ ...form, phone: formatPhoneBR(e.target.value) })}
+                className="gobarber-input"
+                maxLength={15}
+                placeholder="(81) 99999-9999"
+              />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">CPF *</label>
@@ -531,7 +544,7 @@ export default function ClientesPage() {
             <div className="grid grid-cols-2 gap-3">
               <div><span className="text-xs text-gray-500">Nome</span><p className="font-medium">{detailModal.name}</p></div>
               <div><span className="text-xs text-gray-500">Email</span><p className="font-medium">{detailModal.email}</p></div>
-              <div><span className="text-xs text-gray-500">Telefone</span><p className="font-medium">{detailModal.phone || "—"}</p></div>
+              <div><span className="text-xs text-gray-500">Telefone</span><p className="font-medium">{detailModal.phone ? formatPhoneBR(detailModal.phone) : "—"}</p></div>
               <div><span className="text-xs text-gray-500">CPF</span><p className="font-medium">{detailModal.cpf || "—"}</p></div>
               <div><span className="text-xs text-gray-500">Nascimento</span><p className="font-medium">{detailModal.birthDate || "—"}</p></div>
               <div><span className="text-xs text-gray-500">Status</span><p className="font-medium">{detailModal.active !== false ? "Ativo" : "Inativo"}</p></div>

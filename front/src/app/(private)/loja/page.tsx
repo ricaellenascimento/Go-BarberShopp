@@ -2,9 +2,8 @@
 
 import GoBarberLayout from "@/components/Layout/GoBarberLayout";
 import Modal from "@/components/Modal/Modal";
-import React, { useEffect, useState, useContext } from "react";
+import React, { useEffect, useState } from "react";
 import { generica } from "@/api/api";
-import { AuthContext } from "@/contexts/AuthContext";
 import { toast } from "react-toastify";
 import {
   FaShoppingCart,
@@ -29,14 +28,17 @@ interface CartItem {
   qty: number;
 }
 
+type CheckoutPaymentMethod = "PIX" | "CREDIT_CARD" | "DEBIT_CARD" | "CASH";
+
 export default function LojaPage() {
-  const auth = useContext(AuthContext);
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [cart, setCart] = useState<CartItem[]>([]);
   const [cartOpen, setCartOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [paymentMethod, setPaymentMethod] = useState<CheckoutPaymentMethod>("PIX");
+  const [finalizingOrder, setFinalizingOrder] = useState(false);
 
   // Promotional coupons
   const [activeSales, setActiveSales] = useState<any[]>([]);
@@ -177,16 +179,50 @@ export default function LojaPage() {
 
   const availableProducts = filteredProducts.filter((p) => (p.quantity ?? 0) > 0);
   const unavailableProducts = filteredProducts.filter((p) => (p.quantity ?? 0) === 0);
-
-  function handleFinalize() {
+  async function handleFinalizeCheckout() {
     if (cart.length === 0) { toast.error("Carrinho vazio"); return; }
-    toast.success(
-      `Pedido registrado! Total: R$ ${cartFinal.toFixed(2)}${appliedCoupon ? ` (desconto aplicado)` : ""} - Compareça à barbearia para retirar.`
-    );
-    setCart([]);
-    setAppliedCoupon(null);
-    setCouponCode("");
-    setCartOpen(false);
+    setFinalizingOrder(true);
+    try {
+      const checkoutPayload = {
+        items: cart.map((item) => ({
+          productId: item.product.id,
+          quantity: item.qty,
+        })),
+        paymentMethod,
+        couponCode: appliedCoupon?.coupon || couponCode.trim() || undefined,
+      };
+
+      const res = await generica({
+        metodo: "POST",
+        uri: "/shop/checkout",
+        data: checkoutPayload,
+      });
+
+      if (res?.status === 200 && res?.data) {
+        const paymentMessage = res.data.paymentMessage ? ` ${res.data.paymentMessage}` : "";
+        const pixMessage = res.data.pixCode ? ` Codigo PIX: ${res.data.pixCode}` : "";
+        const paymentRef = res.data.paymentId ? ` Pagamento #${res.data.paymentId}.` : "";
+        const total = Number(res.data.total ?? cartFinal);
+        toast.success(
+          `Pedido ${res.data.orderCode || ""} registrado! Total: R$ ${total.toFixed(2)}.${paymentMessage}${paymentRef}${pixMessage}`
+        );
+        setCart([]);
+        setAppliedCoupon(null);
+        setCouponCode("");
+        setCartOpen(false);
+        await loadProducts();
+      } else {
+        const errorMessage =
+          res?.data?.message ||
+          res?.data?.error ||
+          "Nao foi possivel finalizar o pedido";
+        toast.error(errorMessage);
+      }
+    } catch {
+      toast.error("Erro ao finalizar pedido");
+    } finally {
+      setFinalizingOrder(false);
+    }
   }
 
   return (
@@ -417,11 +453,30 @@ export default function LojaPage() {
                 <span className="font-semibold text-[#1A1A2E]">Total:</span>
                 <span className="text-xl font-bold text-[#E94560]">R$ {cartFinal.toFixed(2)}</span>
               </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-gray-600">Forma de pagamento</label>
+                <select
+                  value={paymentMethod}
+                  onChange={(e) => setPaymentMethod(e.target.value as CheckoutPaymentMethod)}
+                  className="gobarber-input text-sm"
+                >
+                  <option value="PIX">PIX</option>
+                  <option value="CREDIT_CARD">Cartao de Credito</option>
+                  <option value="DEBIT_CARD">Cartao de Debito</option>
+                  <option value="CASH">Dinheiro</option>
+                </select>
+                <p className="text-xs text-gray-500">
+                  {paymentMethod === "PIX"
+                    ? "Ao finalizar, voce recebe o codigo PIX."
+                    : "Pagamento sera concluido na retirada do pedido."}
+                </p>
+              </div>
               <button
-                onClick={handleFinalize}
-                className="w-full gobarber-btn-primary"
+                onClick={handleFinalizeCheckout}
+                disabled={finalizingOrder}
+                className="w-full gobarber-btn-primary disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                Finalizar Pedido
+                {finalizingOrder ? "Finalizando..." : "Finalizar Pedido"}
               </button>
               <p className="text-xs text-center text-gray-400">
                 O pedido será registrado e você poderá retirá-lo na barbearia.
@@ -433,3 +488,4 @@ export default function LojaPage() {
     </GoBarberLayout>
   );
 }
+

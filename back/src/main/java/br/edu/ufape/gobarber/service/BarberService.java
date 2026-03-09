@@ -94,6 +94,17 @@ public class BarberService {
             }
         }
 
+        User barberUser = barber.getUser();
+        if (barberUser != null) {
+            if (barberCreateDTO.getEmail() != null && !barberCreateDTO.getEmail().isBlank()) {
+                barberUser.setLogin(barberCreateDTO.getEmail());
+            }
+            if (barberCreateDTO.getPassword() != null && !barberCreateDTO.getPassword().isBlank()) {
+                barberUser.setPassword(passwordEncoder.encode(barberCreateDTO.getPassword()));
+            }
+            barber.setUser(userRepository.save(barberUser));
+        }
+
         barber.setName(barberCreateDTO.getName());
         barber.setCpf(barberCreateDTO.getCpf());
         barber.setAddress(address);
@@ -167,6 +178,12 @@ public class BarberService {
                 barberPage.getSize(),
                 barberPage.getContent()
         );
+    }
+
+    public List<BarberWithServiceDTO> getActiveBarbersForPublic() {
+        return barberRepository.findByActiveTrueOrActiveIsNull().stream()
+                .map(this::convertToCompleteDTO)
+                .collect(Collectors.toList());
     }
 
     public byte[] getProfilePhoto(Integer id) throws DataBaseException {

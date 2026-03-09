@@ -54,6 +54,15 @@ interface Payment {
 
 interface Barber { idBarber: number; name?: string; }
 interface Client { idClient: number; name?: string; }
+interface AppointmentOption {
+  id: number;
+  clientName?: string;
+  clientId?: number;
+  totalPrice?: number;
+  status?: string;
+  startTime?: string;
+  barber?: { idBarber?: number; name?: string };
+}
 
 const initialForm = {
   appointmentId: "",
@@ -74,6 +83,7 @@ export default function PagamentosPage() {
   const [payments, setPayments] = useState<Payment[]>([]);
   const [barbers, setBarbers] = useState<Barber[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
+  const [appointments, setAppointments] = useState<AppointmentOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
@@ -99,12 +109,23 @@ export default function PagamentosPage() {
   const [barberCommissions, setBarberCommissions] = useState<any[]>([]);
   const [dailyRevenue, setDailyRevenue] = useState<any[]>([]);
 
-  useEffect(() => { loadPayments(); loadBarbers(); loadClients(); loadPendingCount(); }, []);
+  useEffect(() => { loadPayments(); loadBarbers(); loadClients(); loadAppointmentOptions(); loadPendingCount(); }, []);
+
+  async function refreshCurrentList() {
+    if (activeTab === "pending") await loadPendingPayments();
+    else await loadPayments();
+    await loadPendingCount();
+  }
 
   async function loadPayments() {
     setLoading(true);
     try {
       const response = await generica({ metodo: "GET", uri: "/payment", params: { page: 0, size: 100 } });
+      if (!response || response.status >= 400) {
+        toast.error(response?.data?.message || "Nao foi possivel carregar pagamentos");
+        setPayments([]);
+        return;
+      }
       const data = response?.data?.content || response?.data || [];
       setPayments(Array.isArray(data) ? data : []);
     } catch { toast.error("Erro ao carregar pagamentos"); }
@@ -127,22 +148,43 @@ export default function PagamentosPage() {
     } catch { /* silencioso */ }
   }
 
+  async function loadAppointmentOptions() {
+    try {
+      const res = await generica({ metodo: "GET", uri: "/appointments", params: { page: 0, size: 200 } });
+      const data = res?.data?.content || res?.data || [];
+      const list = Array.isArray(data) ? data : [];
+      const valid = list.filter((a: AppointmentOption) => !["REJECTED", "CANCELLED"].includes((a.status || "").toUpperCase()));
+      setAppointments(valid);
+    } catch { /* silencioso */ }
+  }
+
+  function handleAppointmentChange(appointmentIdValue: string) {
+    const selected = appointments.find((a) => a.id === Number(appointmentIdValue));
+    setForm((prev) => ({
+      ...prev,
+      appointmentId: appointmentIdValue,
+      amount: prev.amount || (selected?.totalPrice != null ? String(selected.totalPrice) : ""),
+      clientId: prev.clientId || (selected?.clientId ? String(selected.clientId) : ""),
+      barberId: prev.barberId || (selected?.barber?.idBarber ? String(selected.barber.idBarber) : ""),
+    }));
+  }
+
   function openCreate() { setForm(initialForm); setModalOpen(true); }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!form.amount || !form.paymentMethod) {
-      toast.error("Preencha valor e método de pagamento"); return;
+    if (!form.appointmentId || !form.amount || !form.paymentMethod) {
+      toast.error("Selecione agendamento, valor e metodo de pagamento"); return;
     }
     setSaving(true);
     try {
       const payload: Record<string, unknown> = {
+        appointmentId: parseInt(form.appointmentId),
         amount: parseFloat(form.amount),
         paymentMethod: form.paymentMethod,
         installments: form.installments,
         notes: form.notes || undefined,
       };
-      if (form.appointmentId) payload.appointmentId = parseInt(form.appointmentId);
       if (form.clientId) payload.clientId = parseInt(form.clientId);
       if (form.barberId) payload.barberId = parseInt(form.barberId);
       if (form.commissionRate) payload.commissionRate = parseFloat(form.commissionRate);
@@ -155,7 +197,7 @@ export default function PagamentosPage() {
       if (res?.status === 200 || res?.status === 201) {
         toast.success("Pagamento registrado!");
         setModalOpen(false);
-        loadPayments();
+        await refreshCurrentList();
       } else toast.error(res?.data?.message || "Erro ao registrar pagamento");
     } catch { toast.error("Erro ao registrar pagamento"); }
     finally { setSaving(false); }
@@ -164,7 +206,7 @@ export default function PagamentosPage() {
   async function confirmPayment(id: number) {
     try {
       const res = await generica({ metodo: "POST", uri: `/payment/${id}/confirm`, params: { transactionId: `TXN-${Date.now()}` } });
-      if (res?.status === 200) { toast.success("Pagamento confirmado!"); loadPayments(); }
+      if (res?.status === 200) { toast.success("Pagamento confirmado!"); await refreshCurrentList(); }
       else toast.error("Erro ao confirmar");
     } catch { toast.error("Erro ao confirmar pagamento"); }
   }
@@ -183,7 +225,7 @@ export default function PagamentosPage() {
     if (!result.isConfirmed) return;
     try {
       const res = await generica({ metodo: "POST", uri: `/payment/${id}/cancel` });
-      if (res?.status === 200) { toast.success("Pagamento cancelado!"); loadPayments(); }
+      if (res?.status === 200) { toast.success("Pagamento cancelado!"); await refreshCurrentList(); }
       else toast.error("Erro ao cancelar");
     } catch { toast.error("Erro ao cancelar pagamento"); }
   }
@@ -204,7 +246,7 @@ export default function PagamentosPage() {
     if (!reason) return;
     try {
       const res = await generica({ metodo: "POST", uri: `/payment/${id}/refund`, params: { reason } });
-      if (res?.status === 200) { toast.success("Reembolso realizado!"); loadPayments(); }
+      if (res?.status === 200) { toast.success("Reembolso realizado!"); await refreshCurrentList(); }
       else toast.error("Erro ao reembolsar");
     } catch { toast.error("Erro ao reembolsar"); }
   }
@@ -244,7 +286,7 @@ export default function PagamentosPage() {
     if (reason === undefined) return;
     try {
       const res = await generica({ metodo: "POST", uri: `/payment/${id}/partial-refund`, params: { amount: parseFloat(amountStr), reason: reason || "Reembolso parcial" } });
-      if (res?.status === 200) { toast.success("Reembolso parcial realizado!"); loadPayments(); }
+      if (res?.status === 200) { toast.success("Reembolso parcial realizado!"); await refreshCurrentList(); }
       else toast.error("Erro ao reembolsar parcialmente");
     } catch { toast.error("Erro no reembolso parcial"); }
   }
@@ -311,7 +353,14 @@ export default function PagamentosPage() {
     if (!periodStart || !periodEnd) { toast.error("Informe as datas"); return; }
     setLoading(true);
     try {
-      const res = await generica({ metodo: "GET", uri: "/payment/period", params: { startDate: periodStart, endDate: periodEnd, page: 0, size: 100 } });
+      const startDate = `${periodStart}T00:00:00`;
+      const endDate = `${periodEnd}T23:59:59`;
+      const res = await generica({ metodo: "GET", uri: "/payment/period", params: { startDate, endDate, page: 0, size: 100 } });
+      if (!res || res.status >= 400) {
+        toast.error(res?.data?.message || "Nao foi possivel filtrar por periodo");
+        setPayments([]);
+        return;
+      }
       const data = res?.data?.content || res?.data || [];
       setPayments(Array.isArray(data) ? data : []);
     } catch { toast.error("Erro ao filtrar por período"); }
@@ -323,7 +372,9 @@ export default function PagamentosPage() {
     try {
       const res = await generica({ metodo: "GET", uri: "/payment/pending", params: { page: 0, size: 100 } });
       const data = res?.data?.content || res?.data || [];
-      setPendingPayments(Array.isArray(data) ? data : []);
+      const list = Array.isArray(data) ? data : [];
+      setPendingPayments(list);
+      setPayments(list);
     } catch { /* silencioso */ }
     finally { setLoading(false); }
   }
@@ -378,6 +429,7 @@ export default function PagamentosPage() {
 
   const getStatusBadge = (status?: string) => {
     switch (status?.toUpperCase()) {
+      case "COMPLETED":
       case "CONFIRMED": return "bg-green-100 text-green-700";
       case "PENDING": return "bg-yellow-100 text-yellow-700";
       case "CANCELLED": return "bg-red-100 text-red-700";
@@ -387,14 +439,31 @@ export default function PagamentosPage() {
   };
 
   const methodLabel: Record<string, string> = {
-    PIX: "PIX", CREDIT_CARD: "Cartão de Crédito", DEBIT_CARD: "Cartão de Débito", CASH: "Dinheiro",
+    PIX: "PIX",
+    CREDIT_CARD: "Cartao de Credito",
+    DEBIT_CARD: "Cartao de Debito",
+    CASH: "Dinheiro",
+    BANK_TRANSFER: "Transferencia",
+    LOYALTY_POINTS: "Pontos de Fidelidade",
   };
 
   const filtered = payments.filter(p =>
-    !search || p.clientName?.toLowerCase().includes(search.toLowerCase()) || p.barberName?.toLowerCase().includes(search.toLowerCase())
+    !search
+    || p.clientName?.toLowerCase().includes(search.toLowerCase())
+    || p.barberName?.toLowerCase().includes(search.toLowerCase())
+    || p.notes?.toLowerCase().includes(search.toLowerCase())
   );
 
   const getId = (p: Payment) => p.idPayment || p.id || 0;
+  const getOrigin = (p: Payment) => p.appointmentId ? `Agendamento #${p.appointmentId}` : "Loja";
+  const getPixImageSrc = (value?: string) => {
+    if (!value) return "";
+    const normalized = value.trim();
+    if (!normalized) return "";
+    if (normalized.startsWith("data:image/")) return normalized;
+    const isLikelyBase64 = normalized.length > 120 && /^[A-Za-z0-9+/=\r\n]+$/.test(normalized);
+    return isLikelyBase64 ? `data:image/png;base64,${normalized}` : "";
+  };
 
   return (
     <GoBarberLayout>
@@ -424,7 +493,7 @@ export default function PagamentosPage() {
             <select value={filterStatus} onChange={(e) => { setFilterStatus(e.target.value); if (e.target.value) loadByStatus(e.target.value); else loadPayments(); }} className="gobarber-input w-auto text-sm">
               <option value="">Status</option>
               <option value="PENDING">Pendente</option>
-              <option value="CONFIRMED">Confirmado</option>
+              <option value="COMPLETED">Concluido</option>
               <option value="CANCELLED">Cancelado</option>
               <option value="REFUNDED">Reembolsado</option>
             </select>
@@ -542,6 +611,7 @@ export default function PagamentosPage() {
             <thead>
               <tr className="border-b border-gray-200">
                 <th className="text-left py-3 px-4 font-semibold text-gray-600">Cliente</th>
+                <th className="text-left py-3 px-4 font-semibold text-gray-600">Origem</th>
                 <th className="text-left py-3 px-4 font-semibold text-gray-600">Valor</th>
                 <th className="text-left py-3 px-4 font-semibold text-gray-600">Método</th>
                 <th className="text-left py-3 px-4 font-semibold text-gray-600">Status</th>
@@ -551,9 +621,9 @@ export default function PagamentosPage() {
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={6} className="text-center py-8 text-gray-400">Carregando...</td></tr>
+                <tr><td colSpan={7} className="text-center py-8 text-gray-400">Carregando...</td></tr>
               ) : filtered.length === 0 ? (
-                <tr><td colSpan={6} className="text-center py-8 text-gray-400">Nenhum pagamento registrado</td></tr>
+                <tr><td colSpan={7} className="text-center py-8 text-gray-400">Nenhum pagamento registrado</td></tr>
               ) : (
                 filtered.map((p) => {
                   const pid = getId(p);
@@ -561,6 +631,7 @@ export default function PagamentosPage() {
                   return (
                     <tr key={pid} className="border-b border-gray-100 hover:bg-gray-50">
                       <td className="py-3 px-4 font-medium">{p.clientName || "—"}</td>
+                      <td className="py-3 px-4 text-gray-600">{getOrigin(p)}</td>
                       <td className="py-3 px-4 text-[#1A1A2E] font-semibold">R$ {(p.finalAmount ?? p.amount)?.toFixed(2) || "0.00"}</td>
                       <td className="py-3 px-4">
                         <span className="flex items-center gap-2">{getMethodIcon(method)} {methodLabel[method] || method || "—"}</span>
@@ -583,7 +654,7 @@ export default function PagamentosPage() {
                               <button onClick={() => cancelPayment(pid)} className="p-1.5 text-red-600 hover:bg-red-50 rounded" title="Cancelar"><FaTimesCircle /></button>
                             </>
                           )}
-                          {p.status?.toUpperCase() === "CONFIRMED" && (
+                          {(p.status?.toUpperCase() === "COMPLETED" || p.status?.toUpperCase() === "CONFIRMED") && (
                             <>
                               <button onClick={() => refundPayment(pid)} className="p-1.5 text-purple-600 hover:bg-purple-50 rounded" title="Reembolso total"><FaUndoAlt /></button>
                               <button onClick={() => partialRefund(pid)} className="p-1.5 text-orange-600 hover:bg-orange-50 rounded" title="Reembolso parcial"><FaDollarSign /></button>
@@ -605,9 +676,9 @@ export default function PagamentosPage() {
       <Modal isOpen={!!pixModal} onClose={() => setPixModal(null)} title="Código PIX">
         {pixModal && (
           <div className="space-y-4 text-center">
-            {pixModal.qrcode && (
+            {getPixImageSrc(typeof pixModal.qrcode === "string" ? pixModal.qrcode : "") && (
               <div className="flex justify-center">
-                <img src={typeof pixModal.qrcode === 'string' && pixModal.qrcode.startsWith('data:') ? pixModal.qrcode : `data:image/png;base64,${pixModal.qrcode}`} alt="QR Code PIX" className="w-48 h-48 border rounded-lg" />
+                <img src={getPixImageSrc(typeof pixModal.qrcode === "string" ? pixModal.qrcode : "")} alt="QR Code PIX" className="w-48 h-48 border rounded-lg" />
               </div>
             )}
             {pixModal.code && (
@@ -654,8 +725,20 @@ export default function PagamentosPage() {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">ID do Agendamento</label>
-              <input type="number" value={form.appointmentId} onChange={(e) => setForm({ ...form, appointmentId: e.target.value })} className="gobarber-input" placeholder="Opcional" />
+              <label className="block text-sm font-medium text-gray-700 mb-1">Agendamento *</label>
+              <select
+                value={form.appointmentId}
+                onChange={(e) => handleAppointmentChange(e.target.value)}
+                className="gobarber-input"
+                required
+              >
+                <option value="">Selecione</option>
+                {appointments.map((apt) => (
+                  <option key={apt.id} value={apt.id}>
+                    #{apt.id} - {apt.clientName || "Cliente"} {apt.startTime ? `(${new Date(apt.startTime).toLocaleString("pt-BR")})` : ""}
+                  </option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Cupom</label>
@@ -702,6 +785,7 @@ export default function PagamentosPage() {
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
               <div><span className="text-xs text-gray-500">Cliente</span><p className="font-medium">{detailModal.clientName || "—"}</p></div>
+              <div><span className="text-xs text-gray-500">Origem</span><p className="font-medium">{detailModal.appointmentId ? `Agendamento #${detailModal.appointmentId}` : "Loja"}</p></div>
               <div><span className="text-xs text-gray-500">Barbeiro</span><p className="font-medium">{detailModal.barberName || "—"}</p></div>
               <div><span className="text-xs text-gray-500">Valor Bruto</span><p className="font-medium">R$ {detailModal.amount?.toFixed(2) || "0.00"}</p></div>
               <div><span className="text-xs text-gray-500">Valor Final</span><p className="font-medium text-[#E94560]">R$ {(detailModal.finalAmount ?? detailModal.amount)?.toFixed(2) || "0.00"}</p></div>
@@ -721,3 +805,6 @@ export default function PagamentosPage() {
     </GoBarberLayout>
   );
 }
+
+
+

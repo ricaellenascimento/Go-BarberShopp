@@ -21,6 +21,7 @@ public class ReviewCreateDTO {
     @NotNull(message = "ID do barbeiro é obrigatório")
     private Integer barberId;
 
+    @NotNull(message = "ID do agendamento é obrigatório")
     private Integer appointmentId;
 
     @NotNull(message = "Avaliação é obrigatória")

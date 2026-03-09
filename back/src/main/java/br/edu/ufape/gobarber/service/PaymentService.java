@@ -6,6 +6,7 @@ import br.edu.ufape.gobarber.exceptions.DataBaseException;
 import br.edu.ufape.gobarber.exceptions.ResourceNotFoundException;
 import br.edu.ufape.gobarber.model.*;
 import br.edu.ufape.gobarber.repository.*;
+import br.edu.ufape.gobarber.util.PixQrCodeUtil;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -34,6 +35,10 @@ public class PaymentService {
 
     @Transactional
     public PaymentDTO createPayment(PaymentCreateDTO dto) throws DataBaseException {
+        if (dto.getAppointmentId() == null) {
+            throw new IllegalArgumentException("Agendamento e obrigatorio para registrar pagamento.");
+        }
+
         Payment payment = new Payment();
 
         payment.setAmount(dto.getAmount());
@@ -99,8 +104,9 @@ public class PaymentService {
 
         // Gera código PIX se necessário
         if (dto.getPaymentMethod() == Payment.PaymentMethod.PIX) {
-            payment.setPixCode(generatePixCode());
-            payment.setPixQrCode(generatePixQrCode(payment.getFinalAmount()));
+            String pixCode = generatePixCode();
+            payment.setPixCode(pixCode);
+            payment.setPixQrCode(generatePixQrCode(pixCode));
         }
 
         // Status inicial
@@ -293,7 +299,23 @@ public class PaymentService {
     public String getPixQrCode(Long id) {
         Payment payment = paymentRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Pagamento não encontrado"));
-        return payment.getPixQrCode();
+        String currentQrCode = payment.getPixQrCode();
+        if (isBase64Image(currentQrCode)) {
+            return currentQrCode;
+        }
+
+        String payload = currentQrCode;
+        if (payload == null || payload.trim().isEmpty()) {
+            payload = payment.getPixCode();
+        }
+        if (payload == null || payload.trim().isEmpty()) {
+            return null;
+        }
+
+        String regeneratedQrCode = generatePixQrCode(payload);
+        payment.setPixQrCode(regeneratedQrCode);
+        paymentRepository.save(payment);
+        return regeneratedQrCode;
     }
 
     public List<PaymentDTO> findByStatus(Payment.PaymentStatus status) {
@@ -395,9 +417,21 @@ public class PaymentService {
         return "PIX" + UUID.randomUUID().toString().replace("-", "").substring(0, 20).toUpperCase();
     }
 
-    private String generatePixQrCode(Double amount) {
-        // Em produção, integrar com API do banco para gerar QR Code real
-        return "00020126580014br.gov.bcb.pix0136" + UUID.randomUUID().toString() + 
-               "52040000530398654" + String.format("%.2f", amount).replace(".", "") + "5802BR";
+    private String generatePixQrCode(String payload) {
+        return PixQrCodeUtil.toBase64Png(payload);
+    }
+
+    private boolean isBase64Image(String value) {
+        if (value == null) {
+            return false;
+        }
+        String normalized = value.trim();
+        if (normalized.isEmpty()) {
+            return false;
+        }
+        if (normalized.startsWith("data:image/")) {
+            return true;
+        }
+        return normalized.length() > 120 && normalized.matches("^[A-Za-z0-9+/=\\r\\n]+$");
     }
 }
