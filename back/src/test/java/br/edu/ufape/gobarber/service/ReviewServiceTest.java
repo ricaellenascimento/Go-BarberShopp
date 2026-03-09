@@ -53,6 +53,7 @@ public class ReviewServiceTest {
     private Review review;
     private Client client;
     private Barber barber;
+    private Appointment appointment;
     private ReviewCreateDTO reviewCreateDTO;
 
     @BeforeEach
@@ -66,6 +67,11 @@ public class ReviewServiceTest {
         barber = new Barber();
         barber.setIdBarber(1);
         barber.setName("Carlos Barbeiro");
+
+        appointment = new Appointment();
+        appointment.setId(1);
+        appointment.setClient(client);
+        appointment.setBarber(barber);
 
         review = Review.builder()
                 .idReview(1L)
@@ -96,6 +102,9 @@ public class ReviewServiceTest {
 
     @Test
     void testCreateReview_Success() throws DataBaseException {
+        reviewCreateDTO.setAppointmentId(1);
+        when(reviewRepository.findByAppointmentId(1)).thenReturn(Optional.empty());
+        when(appointmentRepository.findById(1)).thenReturn(Optional.of(appointment));
         when(clientRepository.findById(1L)).thenReturn(Optional.of(client));
         when(barberRepository.findById(1)).thenReturn(Optional.of(barber));
         when(reviewRepository.save(any(Review.class))).thenReturn(review);
@@ -112,6 +121,9 @@ public class ReviewServiceTest {
 
     @Test
     void testCreateReview_ClientNotFound() {
+        reviewCreateDTO.setAppointmentId(1);
+        when(reviewRepository.findByAppointmentId(1)).thenReturn(Optional.empty());
+        when(appointmentRepository.findById(1)).thenReturn(Optional.of(appointment));
         when(clientRepository.findById(1L)).thenReturn(Optional.empty());
 
         assertThrows(ResourceNotFoundException.class, () -> reviewService.createReview(reviewCreateDTO));
@@ -119,6 +131,9 @@ public class ReviewServiceTest {
 
     @Test
     void testCreateReview_BarberNotFound() {
+        reviewCreateDTO.setAppointmentId(1);
+        when(reviewRepository.findByAppointmentId(1)).thenReturn(Optional.empty());
+        when(appointmentRepository.findById(1)).thenReturn(Optional.of(appointment));
         when(clientRepository.findById(1L)).thenReturn(Optional.of(client));
         when(barberRepository.findById(1)).thenReturn(Optional.empty());
 
@@ -272,7 +287,7 @@ public class ReviewServiceTest {
     @Test
     void testReviewEntity_DefaultValues() {
         Review newReview = new Review();
-        
+
         assertTrue(newReview.getWouldRecommend());
         assertTrue(newReview.getIsVisible());
     }
@@ -307,7 +322,7 @@ public class ReviewServiceTest {
         newReview.setValueRating(4);
 
         Double average = newReview.getAverageRating();
-        
+
         assertNotNull(average);
         assertTrue(average > 0);
     }
