@@ -2,9 +2,8 @@
 
 import GoBarberLayout from "@/components/Layout/GoBarberLayout";
 import Modal from "@/components/Modal/Modal";
-import React, { useEffect, useState, useContext } from "react";
+import React, { useEffect, useState } from "react";
 import { generica } from "@/api/api";
-import { AuthContext } from "@/contexts/AuthContext";
 import { useRoles } from "@/hooks/useRoles";
 import { toast } from "react-toastify";
 import {
@@ -51,9 +50,37 @@ interface BarberRanking {
   reviewCount: number;
 }
 
+interface AppointmentReviewOption {
+  id: number;
+  barberId: number;
+  barberName: string;
+  startTime?: string;
+  endTime?: string;
+  status?: string;
+}
+
+function parseDateTime(raw?: string): Date | null {
+  if (!raw) return null;
+  const value = String(raw).trim();
+
+  if (/^\d{4}-/.test(value)) {
+    const direct = new Date(value);
+    if (!Number.isNaN(direct.getTime())) return direct;
+
+    const normalized = new Date(value.replace(" ", "T"));
+    if (!Number.isNaN(normalized.getTime())) return normalized;
+  }
+
+  const br = value.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if (br) return new Date(+br[3], +br[2] - 1, +br[1], +br[4], +br[5], +(br[6] || 0));
+
+  const isoLike = value.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (isoLike) return new Date(+isoLike[1], +isoLike[2] - 1, +isoLike[3], +isoLike[4], +isoLike[5], +(isoLike[6] || 0));
+
+  return null;
+}
+
 export default function AvaliacoesPage() {
-  const auth = useContext(AuthContext);
-  const userId = auth?.user?.id;
   const { isAdmin, isSecretary, isClient } = useRoles();
 
   const [reviews, setReviews] = useState<Review[]>([]);
@@ -78,7 +105,10 @@ export default function AvaliacoesPage() {
   // Create review
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [barbers, setBarbers] = useState<Barber[]>([]);
+  const [appointmentOptions, setAppointmentOptions] = useState<AppointmentReviewOption[]>([]);
+  const [loggedClientId, setLoggedClientId] = useState<number | null>(null);
   const [reviewForm, setReviewForm] = useState({
+    appointmentId: 0,
     barberId: 0,
     rating: 5,
     comment: "",
@@ -100,12 +130,25 @@ export default function AvaliacoesPage() {
   const [barberAvg, setBarberAvg] = useState<number | null>(null);
   const [barberCount, setBarberCount] = useState<number | null>(null);
   const [barberDistribution, setBarberDistribution] = useState<any>(null);
-  const [clientReviews, setClientReviews] = useState<Review[]>([]);
-
   useEffect(() => {
-    loadReviews();
-    loadStats();
-  }, []);
+    async function bootstrap() {
+      if (!isClient && !isAdmin && !isSecretary) return;
+
+      if (isClient) {
+        const clientId = await ensureLoggedClientId();
+        if (clientId) {
+          await loadClientReviews(clientId);
+        } else {
+          setReviews([]);
+        }
+      } else {
+        await loadReviews();
+        loadStats();
+      }
+    }
+
+    bootstrap();
+  }, [isAdmin, isSecretary, isClient]);
 
   useEffect(() => {
     if (activeTab === "ranking") loadRanking();
@@ -139,11 +182,41 @@ export default function AvaliacoesPage() {
   }
 
   async function loadClientReviews(clientId: number) {
+    setLoading(true);
     try {
       const res = await generica({ metodo: "GET", uri: `/review/client/${clientId}`, params: { page: 0, size: 50 } });
       const data = res?.data?.content || res?.data || [];
-      setClientReviews(Array.isArray(data) ? data : []);
-    } catch { setClientReviews([]); }
+      setReviews(Array.isArray(data) ? data : []);
+    } catch {
+      setReviews([]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function ensureLoggedClientId(): Promise<number | null> {
+    if (loggedClientId && Number.isInteger(loggedClientId) && loggedClientId > 0) {
+      return loggedClientId;
+    }
+    try {
+      const res = await generica({ metodo: "GET", uri: "/client/logged-client" });
+      const id = Number(res?.data?.idClient);
+      if (Number.isInteger(id) && id > 0) {
+        setLoggedClientId(id);
+        return id;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  function formatAppointmentOptionLabel(option: AppointmentReviewOption): string {
+    const dt = parseDateTime(option.startTime || option.endTime);
+    const dateLabel = dt
+      ? `${dt.toLocaleDateString("pt-BR")} ${dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`
+      : "Data indisponivel";
+    return `#${option.id} - ${option.barberName} - ${dateLabel}`;
   }
 
   async function loadReviews() {
@@ -233,13 +306,109 @@ export default function AvaliacoesPage() {
   }
 
   async function openCreateModal() {
-    try {
-      const res = await generica({ metodo: "GET", uri: "/barber", params: { page: 0, size: 100 } });
-      const data = res?.data?.content || res?.data || [];
-      setBarbers(Array.isArray(data) ? data : []);
-    } catch {}
+    let options: Barber[] = [];
+    let availableAppointments: AppointmentReviewOption[] = [];
+
+    if (isClient) {
+      try {
+        const clientId = await ensureLoggedClientId();
+        const [appointmentsRes, reviewsRes] = await Promise.all([
+          generica({ metodo: "GET", uri: "/appointments/my", params: { page: 0, size: 200 } }).catch(() => null),
+          clientId
+            ? generica({ metodo: "GET", uri: `/review/client/${clientId}`, params: { page: 0, size: 200 } }).catch(() => null)
+            : Promise.resolve(null),
+        ]);
+
+        if (clientId) {
+          loadClientReviews(clientId);
+        }
+
+        const reviewedRaw = reviewsRes?.data?.content || reviewsRes?.data || [];
+        const reviewedAppointmentIds = new Set<number>();
+        if (Array.isArray(reviewedRaw)) {
+          reviewedRaw.forEach((review: any) => {
+            const appointmentId = Number(review?.appointmentId);
+            if (Number.isInteger(appointmentId) && appointmentId > 0) {
+              reviewedAppointmentIds.add(appointmentId);
+            }
+          });
+        }
+
+        const appointmentsRaw = appointmentsRes?.data?.content || appointmentsRes?.data || [];
+        if (Array.isArray(appointmentsRaw)) {
+          const now = new Date();
+          const dedup = new Map<number, AppointmentReviewOption>();
+
+          appointmentsRaw.forEach((apt: any) => {
+            const appointmentId = Number(apt?.id ?? apt?.idAppointment);
+            const barberId = Number(apt?.barber?.idBarber ?? apt?.barber?.id ?? apt?.barberId);
+            if (!Number.isInteger(appointmentId) || appointmentId <= 0) return;
+            if (!Number.isInteger(barberId) || barberId <= 0) return;
+            if (reviewedAppointmentIds.has(appointmentId)) return;
+
+            const status = String(apt?.status || "").toUpperCase();
+            if (status === "CANCELLED" || status === "REJECTED") return;
+
+            const compareDate = parseDateTime(apt?.endTime || apt?.startTime);
+            const eligible = status === "COMPLETED" || !compareDate || compareDate < now;
+            if (!eligible) return;
+
+            const barberName = apt?.barber?.name || apt?.barberName || `Barbeiro #${barberId}`;
+            dedup.set(appointmentId, {
+              id: appointmentId,
+              barberId,
+              barberName,
+              startTime: apt?.startTime,
+              endTime: apt?.endTime,
+              status,
+            });
+          });
+
+          availableAppointments = Array.from(dedup.values()).sort((a, b) => {
+            const da = parseDateTime(a.startTime || a.endTime)?.getTime() || 0;
+            const db = parseDateTime(b.startTime || b.endTime)?.getTime() || 0;
+            return db - da;
+          });
+        }
+
+        const uniqueBarbers = new Map<number, Barber>();
+        availableAppointments.forEach((apt) => {
+          if (!uniqueBarbers.has(apt.barberId)) {
+            uniqueBarbers.set(apt.barberId, { idBarber: apt.barberId, name: apt.barberName });
+          }
+        });
+        options = Array.from(uniqueBarbers.values());
+      } catch {
+        // silencioso
+      }
+    }
+
+    if (!isClient && options.length === 0) {
+      try {
+        const res = await generica({ metodo: "GET", uri: "/barber", params: { page: 0, size: 100 } });
+        const data = res?.data?.content || res?.data || [];
+        options = Array.isArray(data) ? data : [];
+      } catch {
+        // silencioso
+      }
+    }
+
+    setAppointmentOptions(availableAppointments);
+    setBarbers(options);
+
+    if (isClient && availableAppointments.length === 0) {
+      toast.info("Voce nao possui atendimentos elegiveis para avaliacao.");
+      return;
+    }
+
+    if (!isClient && options.length === 0) {
+      toast.info("Nao foi possivel listar barbeiros para avaliacao.");
+    }
+
+    const firstAppointment = availableAppointments[0];
     setReviewForm({
-      barberId: 0,
+      appointmentId: firstAppointment?.id || 0,
+      barberId: firstAppointment?.barberId || options[0]?.idBarber || 0,
       rating: 5,
       comment: "",
       serviceRating: 5,
@@ -253,22 +422,74 @@ export default function AvaliacoesPage() {
 
   async function handleCreateReview(e: React.FormEvent) {
     e.preventDefault();
-    if (!reviewForm.barberId) { toast.error("Selecione um barbeiro"); return; }
     setSavingReview(true);
     try {
-      if (!userId) { toast.error("Usuário não identificado. Faça login novamente."); setSavingReview(false); return; }
-      const body = { ...reviewForm, clientId: Number(userId) };
+      let resolvedBarberId = Number(reviewForm.barberId);
+      let resolvedAppointmentId: number | undefined;
+
+      if (isClient) {
+        const selectedAppointmentId = Number(reviewForm.appointmentId);
+        if (!Number.isInteger(selectedAppointmentId) || selectedAppointmentId <= 0) {
+          toast.error("Selecione o atendimento avaliado.");
+          setSavingReview(false);
+          return;
+        }
+        const selected = appointmentOptions.find((option) => option.id === selectedAppointmentId);
+        if (!selected) {
+          toast.error("Atendimento invalido para avaliacao.");
+          setSavingReview(false);
+          return;
+        }
+        resolvedBarberId = selected.barberId;
+        resolvedAppointmentId = selectedAppointmentId;
+      }
+
+      if (!Number.isInteger(resolvedBarberId) || resolvedBarberId <= 0) {
+        toast.error("Selecione um barbeiro");
+        setSavingReview(false);
+        return;
+      }
+
+      const clientId = await ensureLoggedClientId();
+      if (!clientId) {
+        toast.error("Nao foi possivel identificar o cliente logado.");
+        setSavingReview(false);
+        return;
+      }
+      const body: Record<string, any> = {
+        clientId,
+        barberId: resolvedBarberId,
+        rating: reviewForm.rating,
+        comment: reviewForm.comment,
+        serviceRating: reviewForm.serviceRating,
+        punctualityRating: reviewForm.punctualityRating,
+        cleanlinessRating: reviewForm.cleanlinessRating,
+        valueRating: reviewForm.valueRating,
+        wouldRecommend: reviewForm.wouldRecommend,
+      };
+      if (resolvedAppointmentId) {
+        body.appointmentId = resolvedAppointmentId;
+      }
+
       const res = await generica({ metodo: "POST", uri: "/review", data: body });
       if (res?.status === 200 || res?.status === 201) {
-        toast.success("Avaliação enviada!");
+        toast.success("Avaliacao enviada!");
         setCreateModalOpen(false);
-        loadReviews();
-        loadStats();
+        if (resolvedAppointmentId) {
+          setAppointmentOptions((prev) => prev.filter((option) => option.id !== resolvedAppointmentId));
+        }
+        if (isClient && clientId) {
+          loadClientReviews(clientId);
+        } else {
+          loadReviews();
+          loadStats();
+        }
       } else {
-        toast.error("Erro ao enviar avaliação");
+        const msg = res?.data?.message || res?.data?.error;
+        toast.error(msg || "Erro ao enviar avaliacao");
       }
     } catch {
-      toast.error("Erro ao enviar avaliação");
+      toast.error("Erro ao enviar avaliacao");
     } finally {
       setSavingReview(false);
     }
@@ -296,7 +517,16 @@ export default function AvaliacoesPage() {
     </div>
   );
 
+  const selectedAppointment = appointmentOptions.find((option) => option.id === Number(reviewForm.appointmentId));
   const reviewList = activeTab === "pending" ? pendingReviews : reviews;
+  const tabs = isClient
+    ? [{ key: "reviews" as const, label: "Minhas" }]
+    : [
+        { key: "reviews" as const, label: "Todas" },
+        { key: "ranking" as const, label: "Ranking" },
+        { key: "barber-detail" as const, label: "Por Barbeiro" },
+        ...(isAdmin || isSecretary ? [{ key: "pending" as const, label: "Pendentes" }] : []),
+      ];
 
   return (
     <GoBarberLayout>
@@ -337,12 +567,7 @@ export default function AvaliacoesPage() {
 
         {/* Tabs */}
         <div className="flex gap-2 border-b border-gray-200">
-          {[
-            { key: "reviews" as const, label: "Todas" },
-            { key: "ranking" as const, label: "Ranking" },
-            { key: "barber-detail" as const, label: "Por Barbeiro" },
-            ...(isAdmin || isSecretary ? [{ key: "pending" as const, label: "Pendentes" }] : []),
-          ].map((tab) => (
+          {tabs.map((tab) => (
             <button
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
@@ -563,20 +788,58 @@ export default function AvaliacoesPage() {
       {/* Modal criar avaliação */}
       <Modal isOpen={createModalOpen} onClose={() => setCreateModalOpen(false)} title="Nova Avaliação">
         <form onSubmit={handleCreateReview} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Barbeiro *</label>
-            <select
-              value={reviewForm.barberId}
-              onChange={(e) => setReviewForm({ ...reviewForm, barberId: Number(e.target.value) })}
-              className="gobarber-input"
-              required
-            >
-              <option value={0}>Selecione...</option>
-              {barbers.map((b) => (
-                <option key={b.idBarber} value={b.idBarber}>{b.name || `Barbeiro #${b.idBarber}`}</option>
-              ))}
-            </select>
-          </div>
+          {isClient ? (
+            <>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Atendimento *</label>
+                <select
+                  value={reviewForm.appointmentId}
+                  onChange={(e) => {
+                    const appointmentId = Number(e.target.value);
+                    const option = appointmentOptions.find((item) => item.id === appointmentId);
+                    setReviewForm({
+                      ...reviewForm,
+                      appointmentId,
+                      barberId: option?.barberId || 0,
+                    });
+                  }}
+                  className="gobarber-input"
+                  required
+                >
+                  <option value={0}>Selecione...</option>
+                  {appointmentOptions.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {formatAppointmentOptionLabel(option)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Barbeiro</label>
+                <input
+                  type="text"
+                  value={selectedAppointment?.barberName || "Selecione um atendimento"}
+                  className="gobarber-input bg-gray-50"
+                  readOnly
+                />
+              </div>
+            </>
+          ) : (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Barbeiro *</label>
+              <select
+                value={reviewForm.barberId}
+                onChange={(e) => setReviewForm({ ...reviewForm, barberId: Number(e.target.value) })}
+                className="gobarber-input"
+                required
+              >
+                <option value={0}>Selecione...</option>
+                {barbers.map((b) => (
+                  <option key={b.idBarber} value={b.idBarber}>{b.name || `Barbeiro #${b.idBarber}`}</option>
+                ))}
+              </select>
+            </div>
+          )}
           <StarSelector label="Avaliação Geral *" value={reviewForm.rating} onChange={(v) => setReviewForm({ ...reviewForm, rating: v })} />
           <div className="grid grid-cols-2 gap-4">
             <StarSelector label="Serviço" value={reviewForm.serviceRating} onChange={(v) => setReviewForm({ ...reviewForm, serviceRating: v })} />

@@ -47,7 +47,7 @@ const allMenuItems: MenuEntry[] = [
   { path: "/clientes",         label: "Clientes",           icon: <FaUsers />,          roles: ["ADMIN", "SECRETARY"] },
   { path: "/servicos",         label: "Serviços",           icon: <FaUserTie />,        roles: ["ADMIN"] },
   { path: "/produtos",         label: "Produtos & Estoque", icon: <FaBoxes />,          roles: ["ADMIN"] },
-  { path: "/avaliacoes",       label: "Avaliações",         icon: <FaStar />,           roles: ["ADMIN", "BARBER"] },
+  { path: "/avaliacoes",       label: "Avaliações",         icon: <FaStar />,           roles: ["ADMIN", "BARBER", "CLIENT"] },
   { path: "/pagamentos",       label: "Pagamentos",         icon: <FaCreditCard />,     roles: ["ADMIN", "SECRETARY"] },
   { path: "/promocoes",        label: "Promoções & Cupons", icon: <FaTags />,           roles: ["ADMIN"] },
   { path: "/lista-espera",     label: "Lista de Espera",    icon: <FaClock />,          roles: ["ADMIN", "SECRETARY"] },

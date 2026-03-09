@@ -86,6 +86,7 @@ public class SecurityConfiguration {
 
                         // Reviews - GET para staff, escrita somente admin, POST criação para CLIENT
                         .antMatchers(HttpMethod.POST, "/review").hasAnyRole("ADMIN", "CLIENT")
+                        .antMatchers(HttpMethod.GET, "/review/client/**").hasAnyRole("ADMIN", "CLIENT")
                         .antMatchers(HttpMethod.GET, "/review/**").hasAnyRole("ADMIN", "BARBER", "SECRETARY")
                         .antMatchers("/review/**").hasRole("ADMIN")
 
